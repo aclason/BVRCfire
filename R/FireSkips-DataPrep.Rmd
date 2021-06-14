@@ -20,10 +20,14 @@ library(sf)
 library(stringr)
 library(readr)
 library(ggplot2)
+```
+
+
+Spatial files - only bring in if running MakeFireDataTable.R
+```{r}
 #source(MakeFireDataTable.R) #if you need to actually run the fire table script to generate data tables. Could do it as a function instead where you pass a fireID and create a datatable from that
 
 #Pathways:
-
 #Study fire
 study_fireTable <- fread("C:/Users/Alana2012/ALANA_FILES/GitHub/BVRCfire/inputs/StudyFireList.csv")
 
@@ -57,6 +61,9 @@ rm(severity)
 rm(Results_All)
 gc()
 
+#BEC database:
+BEC <- read_sf("F:/Spatial Data/BEC/Polygons/BECpolygons.shp")
+
 #populated RESULTS data
 
 #Should do a check on all layers to make sure same projection
@@ -79,6 +86,9 @@ VRI_study_sel <- VRI_study %>%
 VRI_study_DT <- as.data.table(VRI_study)
 rm(VRI_study)
 gc()
+
+dem <- raster("")
+
 ```
 Determining age of plantation isn't as straight-forward as I thought. We need to determine what constitutes a plantation to be included in this analysis:
 - all openings with a minimum of 1 treatment? (cut, planting, spacing, brushing?)
@@ -88,27 +98,16 @@ or
 
 
 
-Populating Data for plantation skips analysis:
-
-- this is about under what conditions (forest management) did plantations not have crown fire
-- this isn't about fire skips in the whole fire
-- this isn't about the deciduous component
-
-As far as I know, we don't have the Carole Mahood layer for all of these 20+ fires.
 The problem with the 50% cut-off on previous fire boundaries is that the size of the opening matters. Large openings will be unlikely to have as many previous fires meet that criteria, and small openings more
 
 
-Bringing in data from csvs produced in MakeFireDataTable.R
 
-Working with RESULTS data analysis mostly
+
+Working with firetable data
 ```{r}
 #Fires with results:
-Fire_shortList <- c("K20637","C20735","C50647","C50744","C20729","C10784","C10970", "R11796",
-                    "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
-
-#removed "VA1964", "VA1787" "C12594" because only 1 and 4 results openings in each
 dt <- data.table()
-Plantations <- data.table()
+Plantations_ <- data.table()
 for(j in 1:length(Fire_shortList)){
   dt <- fread(paste0("./Outputs/IndividualFires/",Fire_shortList[j],"_Firedat.csv"),
               colClasses = list(IDate =c("APPROVE_DA","DISTURBANC","DISTURBA_1","DENUDATI_4","DENUDATI_9",
@@ -117,10 +116,12 @@ for(j in 1:length(Fire_shortList)){
   dt[, ':='(FireID = Fire_shortList[j])]
   dt[,.N,by=OPENING_ID]
   dt[,.N]
-  Plantations <- rbind(Plantations,dt,fill=TRUE)
+  Plantations_ <- rbind(Plantations_,dt,fill=TRUE)
 }
-Plantations <- merge(Plantations,study_fireTable, by="FireID")
-
+Plantations_ <- merge(Plantations,study_fireTable, by="FireID")
+unique(Plantations_$DENUDATI_1)
+unique(Plantations_$DENUDATI_6)
+Plantations_[DENUDATI_1=="SHELT"]
 ###### Data checks #######
 Plantations[,.N,by=OPENING_ID]
 Plantations[,.N]
@@ -128,7 +129,7 @@ Plantations[,.N]
 Plantations[,.N,c("DENUDATION","DENUDATI_5")]
 Plantations[DENUDATION =="B" & is.na(DENUDATI_5)] #sites just with Burn call have site prep and planting. Good.
 Plantations[DENUDATION =="W" & is.na(DENUDATI_5)] #same with windthrow
-PlantationsAge[DENUDATION =="L" & DENUDATI_5=="D"]
+Plantations[DENUDATION =="L" & DENUDATI_5=="D"]
 ###########
 
 Plantations[,TotOpenArea:=TotArea/10000] #area of the RESULTS opening
@@ -163,19 +164,6 @@ range(PlantationsAge[,PlantAge])
 hist(PlantationsAge[,PlantAge])
 median(PlantationsAge[,PlantAge])
 
-###### TREATMENTS (0,1) ########
-PlantationsAge[,Spaced := ifelse(SPACING__1==0,0,1)]
-PlantationsAge[,Brushed := ifelse(BRUSHING_1==0,0,1)]
-PlantationsAge[,SitePrepped := ifelse(SITE_PRE_5==0,0,1)]
-PlantationsAge[,Fertil := ifelse(FERTILIZ_2==0,0,1)]
-PlantationsAge[,Prune := ifelse(PRUNING__1==0,0,1)]
-
-####### Making sure the severity is 0 if there was none (not NA)
-PlantationsAge[,High:= ifelse(is.na(High),0,High)]
-PlantationsAge[,Medium:= ifelse(is.na(Medium),0,Medium)]
-PlantationsAge[,Low:= ifelse(is.na(Low),0,Low)]
-PlantationsAge[,Unburned:= ifelse(is.na(Unburned),0,Unburned)]
-############################
 
 #summary information about openings in these study fires:
 PlantationsAge[,.N,by=FireID]
@@ -188,6 +176,7 @@ write.csv(PlantationsAge,"./Outputs/PlantationsAge.csv", row.names=FALSE)
 
 PlantationsAge[PlantAge>45]
 PlantationsAge[!is.na(DENUDATI_1) | !is.na(DENUDATI_6),.N]
+
 
 
 ```
@@ -399,9 +388,9 @@ fires$TotFireArea <- st_area(fires)
 firesDT <- as.data.table(fires)
 firesDT[,TotFireArea := unclass(TotFireArea)/10000]
 firesDTmerge <- firesDT[,.(FIRE_NUMBE,FIRE_YEAR,TotFireArea)]
-
+firesDT[,sum(TotFireArea)]
 ############## All plantations summed ##########
-#figuring out area wthin each fire severity category for the whole fire
+#figuring out area wthin each fire severity category for the whole fire  - might have done this already??
 Fire_Sev <- severity_sel %>% filter(FIRE_NUMBE %in% Fire_shortList)
 #For every fire, calculate the area (ha) of each severity polygon
 Fire_Sev$FireSevArea <- st_area(Fire_Sev)
@@ -417,6 +406,10 @@ setnames(PlantSevSum,"V1","PlantSev")
 PlantFire_Sev <- merge(FireSevSum,PlantSevSum, by.x=c("FIRE_NUMBE","BURN_SEVER"),by.y=c("FireID","variable"))
 PlantFire_Sev_Tot <- merge(PlantFire_Sev,firesDTmerge, by="FIRE_NUMBE")
 PlantFire_Sev_Tot[,sum(PlantSev),by="FIRE_NUMBE"]
+PlantFire_Sev_Tot[,sum(PlantSev)]
+PlantFire_Sev_Tot[,sum(PlantSev)]
+
+
 
 ############# Overlapping polygons #############
 #bringing in the overlapping polygons:
@@ -425,15 +418,15 @@ overlapPlantations <- merge(PlantationsAge[,.(OPENING_ID,FireID,TotOpenArea,Plan
                             r_t_dat_p_Notself_, by="OPENING_ID", all.y=T)
 overlapPlantations[PropResOverlap>0.9] #polygons with 100% overlap (30)
 
-
-
 ############### Unioned together ##############
 #versus when unioned together (accounting for spatial overlap)
 Plant_union <- fread("./Outputs/IndividualFires/PropBurnDat.csv")
 Plant_union <- Plant_union %>% filter(FIRE_NUMBE %in% Fire_shortList)
 Plant_union[,sum(PlantAreaSev),by="FIRE_NUMBE"]
+Plant_union[,sum(na.omit(PlantAreaSev))] #unioned ==22713 - can't be right
 
-merge(PlantFire_Sev,Plant_union, by=c("FIRE_NUMBE","BURN_SEVER"))
+
+PlantFire_Sev_PlUnion <-merge(PlantFire_Sev,Plant_union, by=c("FIRE_NUMBE","BURN_SEVER"))
 ###############################################
 #What's the total amount of area in plantations by fire
 ggplot(PlantFire_Sev_Tot[,sum(PlantSev)/sum(FireSev),by="FIRE_NUMBE"],aes(x=FIRE_NUMBE,y=V1))+
@@ -454,6 +447,25 @@ ggplot(PlantFire_Sev_Tot,aes(x=PrFireSev, y=PrPlSev, colour=BURN_SEVER))+
   ylab("Proportion of plantation fire area")+
   xlim(0,0.7)+
   ylim(0,0.7)
+
+
+#area in each severity class across all fires - plantations vs not
+AllFireSev <- PlantFire_Sev_Tot[,.(Plantations=sum(PlantSev), OverallFire=sum(FireSev)),by="BURN_SEVER"]
+pf <-melt(AllFireSev,id.vars = "BURN_SEVER")
+pf[, Proportion := value/sum(value), by=c("variable")]
+levels(pf$BURN_SEVER) <- c("Unburned","Low","Medium","High")
+
+ggplot(pf, aes(fill=BURN_SEVER, x=variable, y=value))+
+  geom_col(position="stack")+
+  ylab("Area in each burn severity class")+
+  xlab("Area in plantations and total fire")
+
+ggplot(pf, aes(fill=BURN_SEVER, x=variable, y=Proportion))+
+  geom_col(position="stack")+
+  ylab("Proportion each burn severity class")+
+  xlab("Proportion in plantations and total fire")
+
+
 
 #I think we want to force the intercept to be zero, so we can interpret the slopes
 coef(lm(PrPlSev~PrFireSev-1, data=PlantFire_Sev_Tot[BURN_SEVER=="Unburned"]))
@@ -486,6 +498,8 @@ PlantFire_Sev_Tot_melt <- melt(PlantFire_Sev_Tot[,.(FIRE_NUMBE,BURN_SEVER,PrPlSe
                                                     PrFireSev,FIRE_YEAR)],
                                id.vars=c("FIRE_NUMBE","BURN_SEVER","FIRE_YEAR"),
                                value.name = "Percent")
+PlantFire_Sev_Tot[,.()]
+
 ggplot(PlantFire_Sev_Tot_melt, aes(fill=BURN_SEVER, x=variable, y=Percent))+
   geom_col(position="stack")+
   ylab("cumulative proportion area burned (n=14 fires)")+
@@ -738,6 +752,40 @@ Fire1_Results_PropSev_Pfire_dat <- as.data.table(Fire1_Results_PropSev_Pfire)[,g
 #############################
 Fire1dat <- Fire1_Results_PropSev_Pfire_dat
 
+#old vri query:
+#1. If the VRI has a polygon representing the opening, use this for forest cover
+    #the shapes won't match, so use absolutely ANY of the disturbance date columns to match with VRI harvest date,
+    #then use this VRI for FT, projected height & canopy closure at time of fire
+    #could try something like %m+% months(6) to get plus or %m-% months(6) minus 6 months within harvest date
+    f <- merge(Fire_sev_res_vriDT[as.Date(DISTURBANC,format="%Y/%m/%D")  == as.Date(HARVEST_DA,format="%Y/%m/%D")|
+                                    as.Date(DENUDATI_4,format="%Y/%m/%D") == as.Date(HARVEST_DA,format="%Y/%m/%D")|
+                                    as.Date(DENUDATI_9,format="%Y/%m/%D") == as.Date(HARVEST_DA,format="%Y/%m/%D")|
+                                    as.Date(DISTURBA_1,format="%Y/%m/%D") == as.Date(HARVEST_DA,format="%Y/%m/%D")|
+                                    as.Date(APPROVE_DA,format="%Y/%m/%D") == as.Date(HARVEST_DA,format="%Y/%m/%D")],
+               VRI_sum_all[,.(FEATURE_ID,decidCov,conifCov,PineCov, FirCov, SpruceCov, DFirCov)],by="FEATURE_ID")
+    #because there's multiple VRI polygons associated with an opening, even with the above query, need to average covers
+    #using leading species age and height here
+    harvestVRI <- f[,.(DecVRICov=mean(na.omit(decidCov)),ConVRICov=mean(na.omit(conifCov)),
+                       PineVRICov=mean(na.omit(PineCov)),FirVRICov=mean(na.omit(FirCov)),
+                       SpruVRICov=mean(na.omit(SpruceCov)),DFirVRICov=mean(na.omit(DFirCov)),
+                       CanopCloVRI = mean(na.omit(CROWN_CLOS)), AgeVRI =mean(na.omit(PROJ_AGE_1)),
+                       HeightVRI = mean(na.omit(PROJ_HEIGH)), 
+                       BA_VRI = mean(na.omit(BASAL_AREA)),HarVRI=1),by="OPENING_ID"]
+    
+    #when there is no harvest call in the VRI, use averages to estimate sp, age, etc.
+    g <- merge(Fire_sev_res_vriDT[!(OPENING_ID %in% harvestVRI$OPENING_ID)],
+               VRI_sum_all[,.(FEATURE_ID,decidCov,conifCov,PineCov, FirCov, SpruceCov, DFirCov)],by="FEATURE_ID")
+    harvestVRI_Avg <- g[!(OPENING_ID %in% harvestVRI$OPENING_ID),
+                        .(DecVRICov=mean(na.omit(decidCov)),ConVRICov=mean(na.omit(conifCov)),
+                          PineVRICov=mean(na.omit(PineCov)),FirVRICov=mean(na.omit(FirCov)),
+                          SpruVRICov=mean(na.omit(SpruceCov)),DFirVRICov=mean(na.omit(DFirCov)),
+                          CanopCloVRI = mean(na.omit(CROWN_CLOS)), AgeVRI =mean(na.omit(PROJ_AGE_1)),
+                          HeightVRI = mean(na.omit(PROJ_HEIGH)), 
+                          BA_VRI = mean(na.omit(BASAL_AREA)), HarVRI=0),by="OPENING_ID"]
+
+    harvestVRI_ <- rbind(harvestVRI_Avg,harvestVRI)
+    #combine with Results and proportion fire severity
+    Fire_Results_PropSev_PreFor <- merge(Fire_Results_PropSev,harvestVRI_, by="OPENING_ID")
 
 ```
 
