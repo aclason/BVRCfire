@@ -539,3 +539,122 @@ for(i in 1:length(study_fireTable$FireID)){
   #r_t_dat_p_Notself_ <- rbindlist(r_t_dat_p_Notself)
  # write.csv(r_t_dat_p_Notself_,paste0("./Outputs/IndividualFires/ResultsPolyOverlap.csv"),row.names = FALSE)
 }
+
+##To Do - clean up above to leave what is needed to run for any paper
+#################################
+
+#probably don't need to do this as a function - 
+#current csvs don't have the young openings removed
+
+RemYngPlants <- function(){
+  #read in the plantations 
+  dt <- data.table()
+  Plantations <- data.table()
+  for(j in 2:length(Fire_shortList)){
+    dt <- fread(paste0("./Outputs/IndividualFires/",Fire_shortList[j],"_Firedat.csv"))
+    dt[, ':='(FireID = Fire_shortList[j])]
+    dt[,.N,by=OPENING_ID]
+    dt[,.N]
+    Plantations <- rbind(Plantations,dt,fill=TRUE)
+  }
+  Plantations <- merge(Plantations,study_fireTable, by="FireID")
+
+  
+  ########## remove plantations that are too young ############
+  preDNBR <- dNBR_imageryDates[PrePost_Fire=="Pre-fire"]
+  postDNBR <- dNBR_imageryDates[PrePost_Fire=="Post-fire"]
+  preDNBR[, PreDate:=as.Date(ImageDate2,format="%d/%m/%Y")]
+  postDNBR[, PostDate:=as.Date(ImageDate2,format="%d/%m/%Y")]
+  FireMinDate <- preDNBR[,.(OldestDNBR = min(PreDate)),by="FireNumber"] #what is the oldest date for pre-fire imagery for a fire
+  range(format(FireMinDate[,OldestDNBR],"%m")) #when was preimagery taken
+  range(format(postDNBR[,PostDate],"%m")) #when was postimagery taken
+  FireStartdNBR <- merge(study_fireTable[FireID %in% Fire_shortList,.(FireID,FireName,StartDate)],
+                         FireMinDate, by.x="FireID", by.y="FireNumber")
+  FireStartdNBR[,MinPlantAge := as.numeric(format(as.Date(StartDate,format="%d/%m/%Y"),"%Y"))-
+                  as.numeric(format(OldestDNBR,"%Y"))]
+  Plantations <- Plantations[PlantAge>=max(FireStartdNBR[,MinPlantAge])] #using 3 myear minimum for now
+  ##############################################################
+}
+
+
+AddSitePrep <- function(){
+  ##### ADD DETAILED SP AND PLANTS #####
+  dt <- data.table()
+  SitePrep <- data.table()
+  for(i in 2:14){ #fire C50647 is missing 49 entries
+    dt <- fread(paste0("./Outputs/IndividualFires/",Fire_shortList[i],"_Firedat_SitePrep_MethAdds.csv"),
+                na.strings=c("","NA","<NA>"))
+    
+    cols <-c("SITE_PREP_","SITE_PRE_2",colnames(dt)[grepl("Type",colnames(dt))])
+    cols <- cols[grepl("SITE",cols)]
+    dt[, (cols):=lapply(.SD, as.factor),.SDcols=cols]
+    SitePrepType_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                              measure.vars = cols,
+                              variable.name = "SP",
+                              value.name = "SP_type",value.factor=TRUE)
+    
+    #Site prep method (pburn, trail, knock down etc.)
+    cols <- colnames(dt)[grepl("Meth",colnames(dt))]
+    cols <- cols[grepl("SITE",cols)]
+    dt[, (cols):=lapply(.SD, as.factor),.SDcols=cols]
+    SitePrepMeth_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                              measure.vars = cols,
+                              variable.name = "SP_",
+                              value.name = "SP_Method",value.factor=TRUE)
+    #Site prep date
+    cols <-c("SITE_PRE_1","SITE_PRE_4",colnames(dt)[grepl("Date",colnames(dt))])
+    cols <- cols[grepl("SITE",cols)]
+    dt[, (cols):=lapply(.SD,function(x) as.numeric(format(as.Date(x,tryFormats=c("%d/%m/%Y",
+                                                                                 "%d-%m-%Y",
+                                                                                 "%Y/%m/%d",
+                                                                                 "%Y-%m-%d")),"%Y"))),.SDcols=cols]
+    SitePrepDate_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                              measure.vars = cols,
+                              variable.name = "SP_3",
+                              value.name = "SP_Date")
+    
+    
+    SitePr <- SitePrepType_melt[,.(OPENING_ID,SP_type,
+                                   SP_Method = SitePrepMeth_melt[,SP_Method],
+                                   SP_Date = SitePrepDate_melt[,SP_Date])]
+    SitePr <- SitePr[, SP_type_meth:= paste0(SP_type,"_",SP_Method)]
+    SitePr[, ':='(FireID = Fire_shortList[i])]
+    SitePrep <- rbind(SitePrep,SitePr,fill=TRUE)
+  }
+  unique(SitePrep$SP_type_meth)
+  table(SitePrep$SP_type_meth) #WATCH THAT THERE ARE NO NEW COMBINATIONS WITH NEW DATA ENTERED!!
+  SitePrep[SP_type_meth=="BU_LRIP"]
+  
+  SitePrep[,SPgrUse:=1]
+  #SitePrep <- SitePrep[!is.na(SP_type)&!is.na(SP_Method)]
+  SitePrep[,.N,by="SP_type_meth"]
+  SitePrep[SP_type_meth=="ME_WINDP"]
+  #Bring in the grouping variable - only site preps of interest are kept
+  SitePrep <- merge(SitePrep,SitePrepGroups,by.x="SP_type_meth", by.y="Type_Method", all.x=TRUE)
+  SitePrep[!is.na(GroupName)]
+  SitePrepCast <- dcast(SitePrep[!is.na(GroupName)], OPENING_ID~GroupName, value.var ="SPgrUse",fun.aggregate=sum)
+  for (i in seq_along(SitePrepCast)) set(SitePrepCast, i=which(SitePrepCast[[i]]>0), j=i, value=1)
+  
+  #merge with the main dataset and make sure any opening without a value has a zero.
+  SitePrep2 <- merge(SitePrepCast,SitePrep[,.(OPENING_ID,FireID)], by="OPENING_ID", all.y=TRUE)
+  for (i in seq_along(SitePrep2)) set(SitePrep2, i=which(is.na(SitePrep2[[i]])), j=i, value=0)
+  SitePrep2<- unique(SitePrep2)
+  SitePrep2[which(duplicated(SitePrep2[,OPENING_ID]))]
+  #write.csv(SitePrep,"./Inputs/SitePrep.csv",row.names = FALSE)
+  
+  Plant_SP <- merge(Plantations,SitePrep2, by=c("OPENING_ID","FireID"), all.x=TRUE)
+  #missing results data from 50 openings in C50647 - would take 30 minutes to do
+  Plant_SP <- Plant_SP[!is.na(BroadBurn),] #need to update this when add those openings
+  cols <- c("BroadBurn", "DebrisBurn","DebrisMade","DebrisPiled","DebrisPiledBurn","Soil","WildBurn","MechUnk")
+  #change the site prep method columns to factors
+  Plant_SP[,(cols):=lapply(.SD, as.factor),.SDcols=cols] #make sure site prep methods are factors
+  #write out the full csvs with site prep methods added
+  FiresOfInterest <- c("C20735","C50744","C20729","C10784","C10970", "R11796",
+                       "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
+  #write a csv for each fire to file
+  for(ii in 1:length(FiresOfInterest)){
+    write.csv(Plant_SP[FireID==FiresOfInterest[ii]],
+              paste0("./Outputs/IndividualFires/",FiresOfInterest[ii],"_Firedat_SP.csv"),
+              row.names = FALSE)
+  }
+}
