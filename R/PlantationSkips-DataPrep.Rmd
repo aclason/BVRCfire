@@ -41,7 +41,7 @@ If you try and load in the spatial files that were saved from MakeFireDataTable.
 #if you need to actually run the fire table script to generate data tables. Could do it as a function instead where you pass a fireID and create a datatable from that
 
 ##### Fire perimeters #####
-fire_perimeters <- read_sf("F:/Spatial Data/FCI_Fire_Regen_spatialfiles/Historical wildfire perimeters/BC Wildfire Historical Fire Perimeters.shp",quiet=TRUE)
+fire_perimeters <- read_sf("G:/Spatial Data/FCI_Fire_Regen_spatialfiles/Historical wildfire perimeters/BC Wildfire Historical Fire Perimeters.shp",quiet=TRUE)
 fire_per_sel <- fire_perimeters %>%
   dplyr::select(FIRE_NUMBE,FIRE_YEAR,FIRE_CAUSE)
 
@@ -100,8 +100,6 @@ VRI_study <- read_sf("F:/Spatial Data/Fire/ForestManage_Fire/VRI2016_StudyFires.
 
 ##### BEC database ##### 
 #BEC <- read_sf("F:/Spatial Data/BEC/Polygons/BECpolygons.shp")
-
-
 ```
 
 ## 
@@ -131,7 +129,13 @@ Plantations[,PlantAgeCat := ifelse(PlantAge<11,1,
 
 #change every NA to a 0:
 #for (i in seq_along(Plantations)) set(Plantations, i=which(is.na(Plantations[[i]])), j=i, value=0)
+```
 
+Remove plantations that are younger than the pre-fire imagery
+- it's possible that the young plantations may be younger than the imagery used to capture fire impacts - check here
+should maybe move this to the MakeFireDataTable.R script?
+
+```{r}
 ########## remove plantations that are too young ############
 preDNBR <- dNBR_imageryDates[PrePost_Fire=="Pre-fire"]
 postDNBR <- dNBR_imageryDates[PrePost_Fire=="Post-fire"]
@@ -146,7 +150,13 @@ FireStartdNBR[,MinPlantAge := as.numeric(format(as.Date(StartDate,format="%d/%m/
                 as.numeric(format(OldestDNBR,"%Y"))]
 Plantations <- Plantations[PlantAge>=max(FireStartdNBR[,MinPlantAge])] #using 3 myear minimum for now
 ##############################################################
+```
 
+
+
+
+Deal with surrounding forest - i need to update and remember what this is about - can skip.
+```{r}
 ### Surrounding forest 
 PrSurAgeFT <- melt(Plantations, id.vars= "OPENING_ID",
                    measure.vars =  c("SurY-Dec","SurY-50_50", "SurY-75Con", "SurY-Con", "SurIM-Con","SurIM-50_50",
@@ -271,12 +281,12 @@ ggplot(Plantations_SurPlaCl,
 
 ```
 
-
+Bring in the detailed RESULTS data here
 ```{r }
 ##### ADD DETAILED SP AND PLANTS #####
 dt <- data.table()
 SitePrep <- data.table()
-for(i in 2:14){
+for(i in 2:14){ #fire C50647 is missing 49 entries
   dt <- fread(paste0("./Outputs/IndividualFires/",Fire_shortList[i],"_Firedat_SitePrep_MethAdds.csv"),
                      na.strings=c("","NA","<NA>"))
   
@@ -341,9 +351,24 @@ Plant_SP <- merge(Plantations,SitePrep2, by=c("OPENING_ID","FireID"), all.x=TRUE
 #missing results data from 50 openings in C50647 - would take 30 minutes to do
 Plant_SP <- Plant_SP[!is.na(BroadBurn),] #need to update this when add those openings
 cols <- c("BroadBurn", "DebrisBurn","DebrisMade","DebrisPiled","DebrisPiledBurn","Soil","WildBurn","MechUnk")
+#change the site prep method columns to factors
 Plant_SP[,(cols):=lapply(.SD, as.factor),.SDcols=cols] #make sure site prep methods are factors
-#need to define debris management:
+#write out the full csvs with site prep methods added
+FiresOfInterest <- c("C20735","C50744","C20729","C10784","C10970", "R11796",
+                    "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
+for(ii in 1:length(FiresOfInterest)){
+  write.csv(Plant_SP[FireID==FiresOfInterest[ii]],
+            paste0("./Outputs/IndividualFires/",FiresOfInterest[ii],"_Firedat_SP.csv"),
+            row.names = FALSE)
+}
 
+
+```
+
+
+This is for the plantations skips full manuscript
+```{r}
+#need to define debris management:
 Plant_SP[DebrisPiled=="1" & DebrisBurn =="1"|DebrisPiledBurn=="1",
          DPile_DBU:= as.factor("1")] #if Debris piled and burned
 Plant_SP[DebrisPiled=="1" & DebrisBurn =="0",
@@ -464,8 +489,6 @@ SitePrepMeth_melt <- melt(FireDetRes, id.vars = c("OPENING_ID"),
                                        "SITEPr_6_Meth"),
                       variable.name = "SP_",
                       value.name = "SP_Method")
-
-
 
 ```
 
