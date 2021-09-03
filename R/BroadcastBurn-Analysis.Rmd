@@ -1,0 +1,145 @@
+---
+title: "Broadcast Burn Analysis"
+author: "A. Clason"
+date: "September 1, 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#LOAD LIBRARIES
+```{r eval=TRUE,echo=FALSE}
+library(data.table)
+library(dplyr)
+library(raster) #likely don't need this
+library(sf) #maybe don't need this
+library(stringr)
+library(readr)
+library(ggplot2)
+library(ggpubr)
+
+#set the fires of interest
+study_fireTable <- fread("./Inputs/StudyFireList.csv") #all potential fires
+FiresOfInterest <- c("C20735","C50744","C20729","C10784","C10970", "R11796",
+                       "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
+
+```
+
+##CREATE FIRE DATA TABLES - don't run
+```{r}
+#source(MakeFireDataTable.R) 
+#if you need to actually run the fire table script to generate data tables. Could do it as a function instead where you pass a fireID and create a datatable from that
+## 
+```
+
+##READ IN PROCESSED DATA
+Read in plantations data with site prep treatment methods added
+```{r}
+dt <- data.table()
+Plantations <- data.table()
+for(j in 1:length(FiresOfInterest)){
+  dt <- fread(paste0("./Outputs/IndividualFires/",FiresOfInterest[j],"_Firedat_SP.csv"))
+  dt[, ':='(FireID = FiresOfInterest[j])]
+  dt[,.N,by=OPENING_ID]
+  dt[,.N]
+  Plantations <- rbind(Plantations,dt,fill=TRUE)
+}
+```
+TotArea = total area of the opening in m2
+Total_Area = area of fire from others calculations
+TotOpenArea calculated here = total area of the opening in ha
+
+#EXTRA DATA PROCESSING STEPS
+```{r}
+####sCALE dNBR ############ this really should be moved to MakeFireDataTable.R
+Plantations[,dNBR_sc:= Mn_dNBR*100] #putting dNBR on the right scale
+Plantations[,sur_dNBR_sc:= sur_dNBR*100] #putting dNBR on the right scale
+Plantations[,PlantAgeCat := ifelse(PlantAge<11,1,
+                                     ifelse(PlantAge<21,2,
+                                            ifelse(PlantAge<31,3,
+                                                   ifelse(PlantAge<41,4,
+                                                          ifelse(PlantAge<51,5,6)))))] #plantation age categories
+
+
+```
+
+## ANALYSIS
+### Preliminary looks
+```{r}
+Plantations[,.N, by=c("FireID","BroadBurn")] 
+
+#Nadina fire:
+dat <- Plantations[FireID=="R21721"]
+ggplot(dat)+
+  geom_histogram(aes(x=BroadBurn))
+
+
+```
+
+### Alternate models
+```{r eval=TRUE,echo=FALSE}
+Sev <- "Mn_dNBR"
+AgeCov <- "PlantAge"
+SiteCov <- "DEM_tpi + DEM_hli" #Data need: extract elevation
+BB <- "BroadBurn"
+FWI <- "DOB_FWI" #Data need: get FW for DOB for each opening
+NumPreds <- 4 #age, site, BB, FWI
+
+#this code is a place holder for when all the covariates are ready to go.
+############# Create the alternate model table ##################
+Mod_table <- do.call(CJ, replicate(NumPreds, 0:1, FALSE)) #get all possible combinations of 5 variables
+setnames(Mod_table,c("TSF","Pltr", "ClimCov","SoilCov","SiteCov")) #removed severity
+Mod_table #shows me how many models there should be - must be a better way then this
+Mod_table <- Mod_table[,lapply(.SD, as.character)]
+for (i in seq_along(Mod_table)) set(Mod_table,i=which(Mod_table[[i]]==1), j=i,
+                                    value=as.character(colnames(Mod_table)[i]))
+Mod_table[,Mod:=paste(TSF, Pltr, ClimCov, SoilCov, SiteCov, sep = ",")]
+mod1 <- Mod_table$Mod
+mod1 <- gsub("0,", "", mod1)
+mod1 <- gsub(",0", "", mod1)
+
+Model_list<-list()
+for(ii in 1:nrow(Mod_table)){
+  if(ii==1){
+    Model_list[[ii]]<- "1"
+  } else {
+    Model_list[[ii]] <- paste(unlist(mget(noquote(unlist(strsplit(mod1[ii],","))))),collapse=" + ")
+  }
+}
+
+##################################################################
+######################### Run models #############################
+Nmodels <- list()
+Gmodels <- list()
+for(i in 1:length(Model_list)){
+  Nmodels[[i]] <- lapply(CarbonPool1, function(x){
+    glm(as.formula(paste(as.name(x),"~",Model_list[[i]])), family=gaussian, data=FR_treatments)
+    })
+  Gmodels[[i]] <- lapply(CarbonPool2, function(x){
+    glm(as.formula(paste(as.name(x),"~",Model_list[[i]])), family="Gamma", data=FR_treatments)
+    })
+}
+
+#you have to watch the order of the carbon pools
+AIC_table <- as.data.table(cbind(Model=c(paste0("Model",seq(1,nrow(Mod_table)))),
+                                 MinSoil=0,TotalC=0,FF_C=0,DeadC=0,LiveC=0,mod1))
+for(ii in 1:length(Model_list)){
+  AIC_table[ii,2] <- round(AIC(Nmodels[[ii]][[1]]),0) 
+  AIC_table[ii,3] <- round(AIC(Nmodels[[ii]][[2]]),0)
+  AIC_table[ii,4] <- round(AIC(Gmodels[[ii]][[1]]),0) 
+  AIC_table[ii,5] <- round(AIC(Gmodels[[ii]][[2]]),0)
+  AIC_table[ii,6] <- round(AIC(Gmodels[[ii]][[3]]),0) 
+}
+AIC_table <- AIC_table[,.(Model,TotalC=as.numeric(TotalC),LiveC=as.numeric(LiveC),
+                          DeadC=as.numeric(DeadC),MinSoil=as.numeric(MinSoil),FF_C=as.numeric(FF_C),mod1)]
+####################################################################
+################## Look at model outputs ###########################
+
+setorderv(AIC_table,c("MinSoil"),1)
+AIC_table
+```
+
+
