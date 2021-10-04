@@ -41,7 +41,7 @@ If you try and load in the spatial files that were saved from MakeFireDataTable.
 #if you need to actually run the fire table script to generate data tables. Could do it as a function instead where you pass a fireID and create a datatable from that
 
 ##### Fire perimeters #####
-fire_perimeters <- read_sf("G:/Spatial Data/FCI_Fire_Regen_spatialfiles/Historical wildfire perimeters/BC Wildfire Historical Fire Perimeters.shp",quiet=TRUE)
+fire_perimeters <- read_sf("E:/Spatial Data/Fire/Historical wildfire perimeters/BC Wildfire Historical Fire Perimeters.shp",quiet=TRUE)
 fire_per_sel <- fire_perimeters %>%
   dplyr::select(FIRE_NUMBE,FIRE_YEAR,FIRE_CAUSE)
 
@@ -85,7 +85,7 @@ DEMhli <- raster("./Inputs/Rasters/DEMhli.tif")
 
 ##### Results #####
 #could include Generalize- these describe the BEC subzone/site series
-Results_All <- read_sf("F:/Spatial Data/FCI_Fire_Regen_spatialfiles/RESULTS/RESULTS_FirePerimeter_Intersect.shp",
+Results_All <- read_sf("E:/Spatial Data/RESULTS/RESULTS_FirePerimeter_Intersect.shp",
                        quiet=T)
 Results_sel <- Results_All %>%
     dplyr::select(OPENING_ID,OPENING_ST,APPROVE_DA,DISTURBANC,DISTURBA_1,DENUDATION, DENUDATI_1, 
@@ -130,6 +130,25 @@ Plantations[,PlantAgeCat := ifelse(PlantAge<11,1,
 #change every NA to a 0:
 #for (i in seq_along(Plantations)) set(Plantations, i=which(is.na(Plantations[[i]])), j=i, value=0)
 ```
+
+Phil request - Lat longs added as columns
+```{r}
+#Get the openings that are part of the plantations dataset
+Open_geo <- Results_sel %>%
+  dplyr::select(OPENING_ID, geometry) %>%
+  filter(OPENING_ID %in% Plantations$OPENING_ID)
+#Get the centroid of polygon
+Open_cent <- st_centroid(Open_geo)
+#transform to unprojected lat/long
+Open_cent <- st_transform(Open_cent, crs="+proj=longlat +datum=WGS84 +no_defs")
+#create data table
+Open_centDT <- as.data.table(Open_cent)
+Open_centDT_latLong <- as.data.table(st_coordinates(Open_cent))
+Open_centDT <- Open_centDT[,.(OPENING_ID,X=Open_centDT_latLong$X, Y=Open_centDT_latLong$Y)]
+
+Plantations <- merge(Plantations, Open_centDT, by="OPENING_ID")
+```
+
 
 Remove plantations that are younger than the pre-fire imagery
 - it's possible that the young plantations may be younger than the imagery used to capture fire impacts - check here
@@ -217,7 +236,9 @@ for (i in seq_along(Plantations)) set(Plantations, i=which(is.na(Plantations[[i]
 #Plantations[OPENING_ID %in% PlantReNum[1]]
 #PlantOver <- merge(Plantations,ResultsPolyOverlap, by="OPENING_ID", all.y=T)
 #overlapPlantations[PropResOverlap>0.9] #polygons with 100% overlap (30)
+```
 
+```{r}
 ####################################
 #look at relationships
 ggplot(Plantations,aes(x=PlantAge, y=dNBR_sc))+
@@ -290,13 +311,22 @@ for(i in 2:14){ #fire C50647 is missing 49 entries
   dt <- fread(paste0("./Outputs/IndividualFires/",Fire_shortList[i],"_Firedat_SitePrep_MethAdds.csv"),
                      na.strings=c("","NA","<NA>"))
   
-  cols <-c("SITE_PREP_","SITE_PRE_2",colnames(dt)[grepl("Type",colnames(dt))])
+  cols <-c("SITE_PREP_","SITE_PRE_2",colnames(dt)[grepl("Type",colnames(dt))]) #get type and area
+  AreaCols <- c("SITE_PREP1","SITE_PRE_3",colnames(dt)[grepl("Area",colnames(dt))])
   cols <- cols[grepl("SITE",cols)]
+  AreaCols <- AreaCols[grepl("SITE",AreaCols)]
   dt[, (cols):=lapply(.SD, as.factor),.SDcols=cols]
+  dt[, (AreaCols):=lapply(.SD, as.numeric),.SDcols=AreaCols]
+  #column of SP type
   SitePrepType_melt <- melt(dt, id.vars = c("OPENING_ID"),
                       measure.vars = cols,
                       variable.name = "SP",
-                      value.name = "SP_type",value.factor=TRUE)
+                      value.name = c("SP_type"),value.factor=TRUE)
+  #Column of SP area
+  SitePrepArea_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                      measure.vars = AreaCols,
+                      variable.name = "SP",
+                      value.name = c("SP_Area"),value.factor=FALSE)
  
   #Site prep method (pburn, trail, knock down etc.)
   cols <- colnames(dt)[grepl("Meth",colnames(dt))]
@@ -321,7 +351,8 @@ for(i in 2:14){ #fire C50647 is missing 49 entries
   
   SitePr <- SitePrepType_melt[,.(OPENING_ID,SP_type,
                                    SP_Method = SitePrepMeth_melt[,SP_Method],
-                                   SP_Date = SitePrepDate_melt[,SP_Date])]
+                                   SP_Date = SitePrepDate_melt[,SP_Date],
+                                 SP_Area=SitePrepArea_melt[,SP_Area])]
   SitePr <- SitePr[, SP_type_meth:= paste0(SP_type,"_",SP_Method)]
   SitePr[, ':='(FireID = Fire_shortList[i])]
   SitePrep <- rbind(SitePrep,SitePr,fill=TRUE)
@@ -334,14 +365,26 @@ SitePrep[,SPgrUse:=1]
 #SitePrep <- SitePrep[!is.na(SP_type)&!is.na(SP_Method)]
 SitePrep[,.N,by="SP_type_meth"]
 SitePrep[SP_type_meth=="ME_WINDP"]
+
+##### OPTION 1: USE GROUPING VARIABLE NAMES ####
 #Bring in the grouping variable - only site preps of interest are kept
-SitePrep <- merge(SitePrep,SitePrepGroups,by.x="SP_type_meth", by.y="Type_Method", all.x=TRUE)
-SitePrep[!is.na(GroupName)]
-SitePrepCast <- dcast(SitePrep[!is.na(GroupName)], OPENING_ID~GroupName, value.var ="SPgrUse",fun.aggregate=sum)
+SitePrep <- merge(SitePrep,SitePrepGroups,by.x="SP_type_meth", by.y="Type_Method", all.x=TRUE) #51236
+#SitePrep[!is.na(GroupName)]
+
+#groupname only
+SitePrepCast <- dcast(SitePrep, OPENING_ID~GroupName, value.var ="SPgrUse",fun.aggregate=sum)
+#change all values > 0 to 1s - presence/absence of a given treatment
 for (i in seq_along(SitePrepCast)) set(SitePrepCast, i=which(SitePrepCast[[i]]>0), j=i, value=1)
+
+#sum the area treated by grouping
+AreaTreated <- SitePrep[,.(TreatArea=sum(na.omit(SP_Area))),by=c("OPENING_ID","GroupAreaNm")]
+dAreaTreated <- dcast(AreaTreated, OPENING_ID~GroupAreaNm, value.var="TreatArea",fun.aggregate = sum)
+SitePrepCast <- merge(SitePrepCast,dAreaTreated,by="OPENING_ID",all.x=TRUE)
+
 
 #merge with the main dataset and make sure any opening without a value has a zero.
 SitePrep2 <- merge(SitePrepCast,SitePrep[,.(OPENING_ID,FireID)], by="OPENING_ID", all.y=TRUE)
+#change nas to 0s
 for (i in seq_along(SitePrep2)) set(SitePrep2, i=which(is.na(SitePrep2[[i]])), j=i, value=0)
 SitePrep2<- unique(SitePrep2)
 SitePrep2[which(duplicated(SitePrep2[,OPENING_ID]))]
@@ -349,11 +392,17 @@ SitePrep2[which(duplicated(SitePrep2[,OPENING_ID]))]
 
 Plant_SP <- merge(Plantations,SitePrep2, by=c("OPENING_ID","FireID"), all.x=TRUE)
 #missing results data from 50 openings in C50647 - would take 30 minutes to do
-Plant_SP <- Plant_SP[!is.na(BroadBurn),] #need to update this when add those openings
-cols <- c("BroadBurn", "DebrisBurn","DebrisMade","DebrisPiled","DebrisPiledBurn","Soil","WildBurn","MechUnk")
+#Plant_SP <- Plant_SP[!is.na(BroadBurn),] #need to update this when add those openings
+cols <- c("BroadBurn","Burn","Chemical","DebrisMade","DebrisPiled", "GrassSeed",
+          "Landings","Layout","MechUnk","None","Soil","SpotBurn","Trail")
 #change the site prep method columns to factors
 Plant_SP[,(cols):=lapply(.SD, as.factor),.SDcols=cols] #make sure site prep methods are factors
-#write out the full csvs with site prep methods added
+hist(Plant_SP[SpotBurn==1]$SpotBurn_Area)
+###### OPTION 2: USE THE RESULTS NAMES #####
+#SitePrepCast2 <- dcast(SitePrep, OPENING_ID~SP_type_meth, value.var ="SPgrUse",fun.aggregate=sum)
+######
+
+##### write out the full csvs with site prep methods added
 FiresOfInterest <- c("C20735","C50744","C20729","C10784","C10970", "R11796",
                     "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
 for(ii in 1:length(FiresOfInterest)){
