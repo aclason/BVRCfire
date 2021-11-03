@@ -59,4 +59,4 @@ wind_m <- melt(wind,id.vars = c("Fire_ID","x_y","X","Y"),variable.name="Date",va
 fw <- Reduce(merge, list(bui_m,dc_m,dmc_m,dsr_m,ffmc_m,fwi_m,humidity_m,
                          isi_m,precipitation_m,sdmc_m,temperature_m,wind_m))
 fw[,Date:=as.Date(Date,format="%Y%m%d")]
-write.csv(fw,"./Inputs/Fireweather at Fire Locations/FireWeather.csv")
+write.csv(fw,"./Inputs/Fireweather at Fire Locations/FireWeather.csv", row.names = FALSE)
