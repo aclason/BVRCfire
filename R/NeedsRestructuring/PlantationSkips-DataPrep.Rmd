@@ -28,6 +28,7 @@ Fire_shortList <- c("K20637","C20735","C50647","C50744","C20729","C10784","C1097
 ResultsPolyOverlap <- fread("./Outputs/IndividualFires/ResultsPolyOverlap.csv")
 dNBR_imageryDates <- fread("./Inputs/dNBR_dates.csv")
 SitePrepGroups <- fread("./Inputs/SitePrep_TypeMethods.csv")
+fw <- fread("./Inputs/Fireweather at Fire Locations/FireWeather.csv")
 
 ```
 
@@ -119,8 +120,8 @@ for(j in 2:length(Fire_shortList)){
 }
 Plantations <- merge(Plantations,study_fireTable, by="FireID")
 ############ sCALE dNBR ############
-Plantations[,dNBR_sc:= Mn_dNBR*100]
-Plantations[,sur_dNBR_sc:= sur_dNBR*100]
+Plantations[,dNBR_sc:= Mn_dNBR*1000]
+Plantations[,sur_dNBR_sc:= sur_dNBR*1000]
 Plantations[,PlantAgeCat := ifelse(PlantAge<11,1,
                                    ifelse(PlantAge<21,2,
                                           ifelse(PlantAge<31,3,
@@ -173,134 +174,6 @@ Plantations <- Plantations[PlantAge>=max(FireStartdNBR[,MinPlantAge])] #using 3 
 
 
 
-
-Deal with surrounding forest - i need to update and remember what this is about - can skip.
-```{r}
-### Surrounding forest 
-PrSurAgeFT <- melt(Plantations, id.vars= "OPENING_ID",
-                   measure.vars =  c("SurY-Dec","SurY-50_50", "SurY-75Con", "SurY-Con", "SurIM-Con","SurIM-50_50",
-                                     "SurIM-75Con","SurIM-Dec","SurM-50_50", "SurM-75Con","SurM-Con",
-                                     "SurM-Dec","SurNA-NF"), 
-                   variable.name = "SurAgeFT",
-                   value.name = "SurPr_AgeFT")
-PrMatPine <- melt(Plantations, id.vars= "OPENING_ID",
-                   measure.vars =  c("SurM-PineMix","SurM-75Pine", "SurM-Pine"), 
-                   variable.name = "SurMatPine",
-                   value.name = "SurPr_AgePine")
-PrSurBS <- melt(Plantations, id.vars="OPENING_ID",
-                measure.vars = c("Sur-High","Sur-Medium","Sur-Low","Sur-Unburned"),
-                variable.name = "SurBS",
-                value.name = "SurPr_BS")
-PrSurPlaCl <- melt(Plantations, id.vars="OPENING_ID",
-                measure.vars = c("Sur-AgeCl-1","Sur-AgeCl-2","Sur-AgeCl-3","Sur-AgeCl-4","Sur-AgeCl-5"),
-                variable.name = "SurPlaCl",
-                value.name = "SurPr_PlaCl")
-
-Plantations_SurBS <- merge(Plantations,PrSurBS, by="OPENING_ID")
-Plantations_SurAgeFT <- merge(Plantations,PrSurAgeFT, by="OPENING_ID")
-Plantations_SurMatPine <- merge(Plantations,PrMatPine, by="OPENING_ID")
-Plantations_SurPlaCl <- merge(Plantations,PrSurPlaCl, by="OPENING_ID")
-
-#add up all the area in plantations surrounding a plantation (no age)
-Plantations <- merge(Plantations,PrSurPlaCl[,.(SurTotPlArea =sum(na.omit(SurPr_PlaCl))),by="OPENING_ID"], by="OPENING_ID")
-Plantations[,SurTotPlArea:=ifelse(SurTotPlArea<1,SurTotPlArea,1)]
-
-#Change to years since previous fire
-cols <- colnames(Plantations)[grep("^*[0-9]",colnames(Plantations))]
-PrevFire <- melt(Plantations, id.vars= "OPENING_ID",
-                   measure.vars =  cols, 
-                   variable.name = "PrevFireYr",
-                   value.name = "PrevFirePr")
-PrevFire <- merge(Plantations[,.(OPENING_ID,StartDate)],PrevFire, by="OPENING_ID")
-PrevFire[,StartYear := as.numeric(format(as.Date(StartDate,format="%d/%m/%Y"),"%Y"))]
-PrevFire[,PrevFireYr := as.numeric(format(as.Date(PrevFireYr,format="%Y"),"%Y"))]
-PrevFire[,TSPreF := ifelse(is.na(PrevFirePr),NA, StartYear - PrevFireYr)]
-#the calculation above says any proportion of previous fire counts
-
-#get rid of the year columns:
-Plantations[,(cols):=NULL,with=FALSE]
-Plantations <- merge(Plantations,
-                     PrevFire[!is.na(PrevFirePr),.(NumPrevFires=.N, MinTSPF=min(TSPreF)),by=OPENING_ID],
-                     by="OPENING_ID",all.x=TRUE)
-#change all NAs to 0
-for (i in seq_along(Plantations)) set(Plantations, i=which(is.na(Plantations[[i]])), j=i, value=0)
-#write.csv(Plantations, "./Inputs/Plantations.csv",row.names = FALSE)
-
-############# Combining polygons that have been re-numbered #############
-#PlantReNum <- ResultsPolyOverlap[PropResOverlap==1]
-#overlapFull <- Results_sel %>%
- # filter(OPENING_ID %in% c(PlantReNum$OPENING_ID,PlantReNum$OPENING_ID.1))
-#write_sf(overlapFull,"overlapFull.shp")
-#Plantations[OPENING_ID %in% PlantReNum$OPENING_ID.1]
-#Plantations[OPENING_ID %in% c(-512650000,1658741)]
-#Plantations[OPENING_ID %in% PlantReNum[1]]
-#PlantOver <- merge(Plantations,ResultsPolyOverlap, by="OPENING_ID", all.y=T)
-#overlapPlantations[PropResOverlap>0.9] #polygons with 100% overlap (30)
-```
-
-```{r}
-####################################
-#look at relationships
-ggplot(Plantations,aes(x=PlantAge, y=dNBR_sc))+
-  geom_point()+
-  geom_smooth(method="gam")
-
-ggplot(Plantations,aes(x=PlantAge, y=dNBR_sc))+
-  geom_point()+
-  geom_smooth(method="lm")
-
-ggplot(Plantations,aes(x=SurTotPlArea, y=dNBR_sc))+
-  geom_point()+
-  geom_smooth(method="lm")
-
-ggplot(Plantations,aes(x=dNBR_sc, y=sur_dNBR_sc))+
-  geom_point(aes(colour=factor(PlantAgeCat)))+
-  geom_smooth(method="lm", formula = y ~ x-1)
-
-
-
-
-ggplot(Plantations_melt[SurBS=="Sur-High"],aes(x=High, y=SurPr_BS))+
-  geom_point()+
-  geom_smooth(method="lm", formula=y ~ x-1)
-ggplot(Plantations[SurBS=="Sur-Medium"],aes(x=Medium, y=SurPr_BS))+
-  geom_point()+
-  geom_smooth(method="lm")
-ggplot(Plantations[SurBS=="Sur-Low"],aes(x=Low, y=SurPr_BS))+
-  geom_point()+
-  geom_smooth(method="lm")
-ggplot(Plantations[SurBS=="Sur-Unburned"],aes(x=Unburned, y=SurPr_BS))+
-  geom_point()+
-  geom_smooth(method="lm")
-
-#find the skips?
-ggplot(Plantations_melt[SurBS=="Sur-High"],aes(x=Unburned, y=SurPr_BS))+
-  geom_point()+
-  geom_smooth(method="lm")
-ggplot(Plantations_melt[SurBS=="Sur-Medium"],aes(x=Unburned, y=SurPr_BS))+
-  geom_point()+
-  geom_smooth(method="lm")
-ggplot(Plantations_melt[SurBS=="Sur-Low"],aes(x=Unburned, y=SurPr_BS))+
-  geom_point()+
-  geom_smooth(method="lm")
-
-#looking at relationship to surounding forest
-ggplot(Plantations_SurAgeFT[SurAgeFT=="SurY-Con"|SurAgeFT=="SurIM-Con"|SurAgeFT=="SurM-Con"],
-       aes(x=SurPr_AgeFT,y=dNBR_sc,colour=SurAgeFT))+
-  geom_point()+
-  geom_smooth(method="lm", formula=y~x)
-ggplot(Plantations_SurBS,
-       aes(x=SurPr_BS,y=dNBR_sc,colour=SurBS))+
-  geom_point()+
-  geom_smooth(method="lm", formula=y~x-1)
-
-ggplot(Plantations_SurPlaCl,
-       aes(x=SurPr_PlaCl,y=dNBR_sc,colour=SurPlaCl))+
-  geom_point()+
-  geom_smooth(method="lm", formula=y~x-1)
-
-
-```
 
 Bring in the detailed RESULTS data here
 ```{r }
@@ -381,7 +254,6 @@ AreaTreated <- SitePrep[,.(TreatArea=sum(na.omit(SP_Area))),by=c("OPENING_ID","G
 dAreaTreated <- dcast(AreaTreated, OPENING_ID~GroupAreaNm, value.var="TreatArea",fun.aggregate = sum)
 SitePrepCast <- merge(SitePrepCast,dAreaTreated,by="OPENING_ID",all.x=TRUE)
 
-
 #merge with the main dataset and make sure any opening without a value has a zero.
 SitePrep2 <- merge(SitePrepCast,SitePrep[,.(OPENING_ID,FireID)], by="OPENING_ID", all.y=TRUE)
 #change nas to 0s
@@ -391,16 +263,26 @@ SitePrep2[which(duplicated(SitePrep2[,OPENING_ID]))]
 #write.csv(SitePrep,"./Inputs/SitePrep.csv",row.names = FALSE)
 
 Plant_SP <- merge(Plantations,SitePrep2, by=c("OPENING_ID","FireID"), all.x=TRUE)
-#missing results data from 50 openings in C50647 - would take 30 minutes to do
-#Plant_SP <- Plant_SP[!is.na(BroadBurn),] #need to update this when add those openings
-cols <- c("BroadBurn","Burn","Chemical","DebrisMade","DebrisPiled", "GrassSeed",
+#MISSING RESULTS DATA from 50 openings in C50647 - would take 30 minutes to do
+Plant_SP <- Plant_SP[!is.na(BroadBurn),] #need to update this when add those openings
+cols <- c("BroadBurn","PileBurn","WBurn","Chemical","DebrisMade","DebrisPiled", "GrassSeed",
           "Landings","Layout","MechUnk","None","Soil","SpotBurn","Trail")
 #change the site prep method columns to factors
 Plant_SP[,(cols):=lapply(.SD, as.factor),.SDcols=cols] #make sure site prep methods are factors
-hist(Plant_SP[SpotBurn==1]$SpotBurn_Area)
-###### OPTION 2: USE THE RESULTS NAMES #####
-#SitePrepCast2 <- dcast(SitePrep, OPENING_ID~SP_type_meth, value.var ="SPgrUse",fun.aggregate=sum)
-######
+#hist(Plant_SP[SpotBurn==1]$SpotBurn_Area)
+
+Plant_SP[,NoBurn:=as.factor(ifelse(PileBurn==0 & BroadBurn== 0 & SpotBurn==0 & WBurn==0,1,0))]
+Plant_SP[,AnyBurn:=as.factor(ifelse(PileBurn==1 | BroadBurn== 1 | SpotBurn==1 | WBurn==1,1,0))]
+Plant_SP[,PileNoBurn:=as.factor(ifelse(DebrisPiled ==1 & BroadBurn == 0 | 
+                                         DebrisPiled ==1 & SpotBurn == 0 | 
+                                         DebrisPiled ==1 & PileBurn==0,1,0))]
+Plant_SP[,DebrisMade_Burn:=as.factor(ifelse(DebrisMade ==1 & BroadBurn == 1 | 
+                                         DebrisMade ==1 & SpotBurn == 1 | 
+                                         DebrisMade ==1 & PileBurn==1,1,0))]
+Plant_SP[,SoilDist_Burn:=as.factor(ifelse(Soil ==1 & BroadBurn == 1 | 
+                                         Soil ==1 & SpotBurn == 1 | 
+                                         Soil ==1 & PileBurn==1,1,0))]
+
 
 ##### write out the full csvs with site prep methods added
 FiresOfInterest <- c("C20735","C50744","C20729","C10784","C10970", "R11796",
@@ -412,6 +294,118 @@ for(ii in 1:length(FiresOfInterest)){
 }
 
 
+```
+
+Add fire weather for the plantations based on the day they burned
+```{r}
+Fires_2017 <-c("K20637","C20735","C50647","C50744","C20729","C10784","C10970")
+Fires_2018 <-c("R11796","R11498","G41607", "G51632", "R21721", "C11937","R11921")
+
+Plant_SP[FireID %in% Fires_2017, CalDOB := as.Date(Md_DOB, origin=as.Date("2017-01-01"))]
+Plant_SP[FireID %in% Fires_2018, CalDOB := as.Date(Md_DOB, origin=as.Date("2018-01-01"))]
+fw_cols <- c("bui","dc","dmc","dsr","ffmc","fwi","humidity","isi","precipitation","sdmc","temperature","wind")
+fw_means <- fw[, lapply(.SD, function(x)na.omit(mean(x))), .SDcols = fw_cols,by=c("Fire_ID","Date")]
+merge(fw_means,Plant_SP,by.x="Date",by.y="CalDOB")
+
+
+```
+
+
+
+```{r}
+Plant_SP <- Plant_SP[FireID!="C20729"]
+
+
+ggplot(Plant_SP[NoBurn==1])+
+  geom_histogram(aes(x=PlantAge,colour=FireID, fill=FireID))
+
+a <- ggplot(Plant_SP)+
+  geom_boxplot(aes(x=BroadBurn, y=dNBR_sc,colour=FireID))
+b <- ggplot(Plant_SP)+
+  geom_boxplot(aes(x=SpotBurn, y=dNBR_sc,colour=FireID))
+c <- ggplot(Plant_SP)+
+  geom_boxplot(aes(x=PileBurn, y=dNBR_sc,colour=FireID))
+d <- ggplot(Plant_SP)+
+  geom_boxplot(aes(x=PileNoBurn, y=dNBR_sc,colour=FireID))
+ggarrange(a,b,c,d, common.legend = TRUE)
+
+ggplot(Plant_SP, aes(x=BA_VRI, y=dNBR_sc, colour=FireID,alpha=0.5))+
+  geom_point()+
+  geom_smooth()+
+  facet_wrap(~FireID)
+
+ggplot(Plant_SP, aes(x=PlantAge, y=dNBR_sc, colour=FireID,alpha=0.5))+
+  geom_point()+
+  geom_smooth()+
+  facet_wrap(~FireID)
+
+
+
+```
+
+
+Deal with surrounding forest - i need to update and remember what this is about - can skip.
+```{r}
+### Surrounding forest 
+PrSurAgeFT <- melt(Plantations, id.vars= "OPENING_ID",
+                   measure.vars =  c("SurY-Dec","SurY-50_50", "SurY-75Con", "SurY-Con", "SurIM-Con","SurIM-50_50",
+                                     "SurIM-75Con","SurIM-Dec","SurM-50_50", "SurM-75Con","SurM-Con",
+                                     "SurM-Dec","SurNA-NF"), 
+                   variable.name = "SurAgeFT",
+                   value.name = "SurPr_AgeFT")
+PrMatPine <- melt(Plantations, id.vars= "OPENING_ID",
+                   measure.vars =  c("SurM-PineMix","SurM-75Pine", "SurM-Pine"), 
+                   variable.name = "SurMatPine",
+                   value.name = "SurPr_AgePine")
+PrSurBS <- melt(Plantations, id.vars="OPENING_ID",
+                measure.vars = c("Sur-High","Sur-Medium","Sur-Low","Sur-Unburned"),
+                variable.name = "SurBS",
+                value.name = "SurPr_BS")
+PrSurPlaCl <- melt(Plantations, id.vars="OPENING_ID",
+                measure.vars = c("Sur-AgeCl-1","Sur-AgeCl-2","Sur-AgeCl-3","Sur-AgeCl-4","Sur-AgeCl-5"),
+                variable.name = "SurPlaCl",
+                value.name = "SurPr_PlaCl")
+
+Plantations_SurBS <- merge(Plantations,PrSurBS, by="OPENING_ID")
+Plantations_SurAgeFT <- merge(Plantations,PrSurAgeFT, by="OPENING_ID")
+Plantations_SurMatPine <- merge(Plantations,PrMatPine, by="OPENING_ID")
+Plantations_SurPlaCl <- merge(Plantations,PrSurPlaCl, by="OPENING_ID")
+
+#add up all the area in plantations surrounding a plantation (no age)
+Plantations <- merge(Plantations,PrSurPlaCl[,.(SurTotPlArea =sum(na.omit(SurPr_PlaCl))),by="OPENING_ID"], by="OPENING_ID")
+Plantations[,SurTotPlArea:=ifelse(SurTotPlArea<1,SurTotPlArea,1)]
+
+#Change to years since previous fire
+cols <- colnames(Plantations)[grep("^*[0-9]",colnames(Plantations))]
+PrevFire <- melt(Plantations, id.vars= "OPENING_ID",
+                   measure.vars =  cols, 
+                   variable.name = "PrevFireYr",
+                   value.name = "PrevFirePr")
+PrevFire <- merge(Plantations[,.(OPENING_ID,StartDate)],PrevFire, by="OPENING_ID")
+PrevFire[,StartYear := as.numeric(format(as.Date(StartDate,format="%d/%m/%Y"),"%Y"))]
+PrevFire[,PrevFireYr := as.numeric(format(as.Date(PrevFireYr,format="%Y"),"%Y"))]
+PrevFire[,TSPreF := ifelse(is.na(PrevFirePr),NA, StartYear - PrevFireYr)]
+#the calculation above says any proportion of previous fire counts
+
+#get rid of the year columns:
+Plantations[,(cols):=NULL,with=FALSE]
+Plantations <- merge(Plantations,
+                     PrevFire[!is.na(PrevFirePr),.(NumPrevFires=.N, MinTSPF=min(TSPreF)),by=OPENING_ID],
+                     by="OPENING_ID",all.x=TRUE)
+#change all NAs to 0
+for (i in seq_along(Plantations)) set(Plantations, i=which(is.na(Plantations[[i]])), j=i, value=0)
+#write.csv(Plantations, "./Inputs/Plantations.csv",row.names = FALSE)
+
+############# Combining polygons that have been re-numbered #############
+#PlantReNum <- ResultsPolyOverlap[PropResOverlap==1]
+#overlapFull <- Results_sel %>%
+ # filter(OPENING_ID %in% c(PlantReNum$OPENING_ID,PlantReNum$OPENING_ID.1))
+#write_sf(overlapFull,"overlapFull.shp")
+#Plantations[OPENING_ID %in% PlantReNum$OPENING_ID.1]
+#Plantations[OPENING_ID %in% c(-512650000,1658741)]
+#Plantations[OPENING_ID %in% PlantReNum[1]]
+#PlantOver <- merge(Plantations,ResultsPolyOverlap, by="OPENING_ID", all.y=T)
+#overlapPlantations[PropResOverlap>0.9] #polygons with 100% overlap (30)
 ```
 
 

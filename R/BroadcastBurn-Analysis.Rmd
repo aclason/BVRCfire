@@ -25,6 +25,8 @@ library(ggpubr)
 study_fireTable <- fread("./Inputs/StudyFireList.csv") #all potential fires
 FiresOfInterest <- c("C20735","C50744","C20729","C10784","C10970", "R11796",
                        "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
+FiresOfInterest <- c("C20735","C50744","C20729","C10784","C10970", "R11796",
+                       "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
 
 ```
 
@@ -67,14 +69,235 @@ Plantations[,PlantAgeCat := ifelse(PlantAge<11,1,
 ```
 
 ## ANALYSIS
-### Preliminary looks
-```{r}
-Plantations[,.N, by=c("FireID","BroadBurn")] 
+###  Kira's script
 
-#Nadina fire:
-dat <- Plantations[FireID=="R21721"]
-ggplot(dat)+
-  geom_histogram(aes(x=BroadBurn))
+Notes -
+you can't have treat_area in the same model as broadcast burn because they are highly correlated (not totally right because burn treatment is yes/no), but I think it's more important to compare them as alternative models. 
+Same AIC score with treatment area or burn treatment
+```{r}
+library(lme4)
+library(lmerTest)
+
+all<-fread("./Inputs/all_fires2.csv")
+str(all)
+all[,Burn:=as.factor(Burn)]
+all[,Fire_ID:=as.factor(Fire_ID)]
+hist(all$mdDNBR_sc)
+all[,mdDNBR_sc:=Mn_dNBR*1000]
+mean(all[Burn==1,mdDNBR_sc])
+
+#Full model
+AIC(lmer(mdDNBR_sc ~ Burn + PlantAge + DEM_tpi + BA_VRI + DEM_hli  + cov+ Md_DOB +(1|Fire_ID),data = all))
+AIC(lmer(mdDNBR_sc ~ Burn +(1|Fire_ID),data = all))
+AIC(lmer(mdDNBR_sc ~ PlantAge +(1|Fire_ID),data = all))
+summary(lm(mdDNBR_sc ~ Burn,data = all))
+summary(lm(mdDNBR_sc ~ Burn,data = all[Fire_ID=="Nadina"]))
+summary(lm(mdDNBR_sc ~ Burn,data = all[Fire_ID=="Shovel"]))
+summary(lm(mdDNBR_sc ~ Burn,data = all[Fire_ID=="Verdun"]))
+summary(lm(mdDNBR_sc ~ Burn,data = all[Fire_ID=="Island"]))
+
+summary(lm(mdDNBR_sc ~ PlantAge,data = all))
+summary(lm(mdDNBR_sc ~ Burn*PlantAge,data = all))
+
+AIC(lmer(mdDNBR_sc ~ Burn + (1|Fire_ID),data = all)) #random intercepts
+AIC(lmer(mdDNBR_sc ~ PlantAge + (1|Fire_ID),data = all))
+AIC(lmer(mdDNBR_sc ~ Burn+PlantAge + (1|Fire_ID),data = all))
+AIC(lmer(mdDNBR_sc ~ Burn*PlantAge + (1|Fire_ID),data = all))
+
+AIC(lmer(mdDNBR_sc ~ Burn*PlantAge + DEM_tpi + BA_VRI + DEM_hli  + cov + Md_DOB+ (1|Fire_ID),data = all))
+summary(lm(mdDNBR_sc ~ Burn+PlantAge + DEM_tpi + BA_VRI + DEM_hli  + cov,data = all[Fire_ID=="Nadina"]))
+summary(lm(mdDNBR_sc ~ Burn+PlantAge + DEM_tpi + BA_VRI + DEM_hli  + cov,data = all[Fire_ID=="Shovel"]))
+summary(lm(mdDNBR_sc ~ Burn+PlantAge + DEM_tpi + BA_VRI + DEM_hli  + cov,data = all[Fire_ID=="Verdun"]))
+summary(lm(mdDNBR_sc ~ Burn+PlantAge + DEM_tpi + BA_VRI + DEM_hli  + cov,data = all[Fire_ID=="Island"]))
+
+
+
+AIC(lmer(mdDNBR_sc ~ Burn*PlantAge +  BA_VRI + DEM_hli  + cov + Md_DOB+ (1|Fire_ID),data = all))
+AIC(lmer(mdDNBR_sc ~ DEM_tpi + BA_VRI + DEM_hli  + cov + Md_DOB+ (1|Fire_ID),data = all))
+AIC(lmer(mdDNBR_sc ~ DEM_hli  + cov + Md_DOB+ (1|Fire_ID),data = all))
+AIC(lmer(mdDNBR_sc ~ Burn*PlantAge + DEM_tpi + BA_VRI + (1|Fire_ID),data = all))
+
+summary(lmer(mdDNBR_sc ~ Burn + (1|Md_DOB),data = all[Fire_ID=="Shovel"]))
+
+AIC(lmer(mdDNBR_sc ~ (1|Fire_ID),data = all))
+AIC(glm(mdDNBR_sc ~ 1,data = all))
+
+var.test(all[Burn==0]$mdDNBR_sc,all[Burn==1]$mdDNBR_sc)
+t.test(all[Burn==0]$mdDNBR_sc,all[Burn==1]$mdDNBR_sc, var.equal = TRUE)
+
+ggplot()+
+  geom_histogram(data=all[Burn==0],aes(x=mdDNBR_sc, fill=Burn))+
+  geom_histogram(data=all[Burn==1],aes(x=mdDNBR_sc, fill=Burn))+
+  facet_wrap(~Fire_ID)
+
+ggplot(all)+
+  geom_boxplot(aes(x=Burn, y=mdDNBR_sc,colour=Fire_ID))
+
+ggplot(all)+
+  geom_boxplot(aes(x=Burn, y=PlantAge,colour=Fire_ID))
+
+ggplot(all)+
+  geom_boxplot(aes(x=Burn, y=treat_area,colour=Fire_ID))
+
+ggplot(all,aes(x=PlantAge))+
+  geom_histogram()+
+  facet_wrap(~Burn, nrow=2)
+
+ggplot(all)+
+  geom_boxplot(aes(x=Fire_ID, y=mdDNBR_sc))
+
+
+ggplot(all,aes(x=DEM_tpi, y=mdDNBR_sc,colour=Fire_ID))+
+  geom_point()+
+  geom_smooth(method='lm')
+ggplot(all,aes(x=DEM_tpi, y=mdDNBR_sc))+
+  geom_point()+
+  geom_smooth(method='lm')+
+  facet_wrap(~Fire_ID)
+ggplot(all,aes(x=Md_DOB, y=mdDNBR_sc))+
+  geom_point(aes(colour=Burn,alpha=0.5))+
+  #geom_smooth(method='lm')+
+  facet_wrap(~Fire_ID)
+
+FullDat <- Plant_SP[FireID=="R21721"|FireID=="R11921"|FireID=="R11498"|FireID=="R11796"]
+ggplot(FullDat)+
+  geom_point(aes(x=Md_DOB, y=dNBR_sc))+
+  geom_smooth(aes(x=Md_DOB, y=dNBR_sc, colour=BroadBurn),method='lm')+
+  geom_smooth(aes(x=Md_DOB, y=dNBR_sc, colour=PileBurn),method='lm')+
+  geom_smooth(aes(x=Md_DOB, y=dNBR_sc, colour=AnyBurn),method='lm')+
+  facet_wrap(~FireID)
+
+mean(FullDat[BroadBurn==0]$dNBR_sc)
+mean(FullDat[BroadBurn==1]$dNBR_sc)
+t.test(FullDat[BroadBurn==0]$dNBR_sc,FullDat[BroadBurn==1]$dNBR_sc)
+t.test(FullDat[PileBurn==0]$dNBR_sc,FullDat[PileBurn==1]$dNBR_sc)
+t.test(FullDat[PileBurn==0]$dNBR_sc,FullDat[SpotBurn==1]$dNBR_sc)
+t.test(FullDat[PileBurn==0]$dNBR_sc,FullDat[AnyBurn==1]$dNBR_sc)
+
+
+ggplot(all,aes(x=Md_DOB, y=mdDNBR_sc))+
+  geom_point(aes(colour=DEM_tpi,alpha=0.5))+
+  #geom_smooth(method='lm')+
+  facet_wrap(~Fire_ID)
+
+ggplot(all,aes(x=DEM_hli, y=mdDNBR_sc,colour=Fire_ID))+
+  geom_point()+
+  geom_smooth(method='lm')
+
+ggplot(all,aes(x=BA_VRI, y=mdDNBR_sc,colour=Fire_ID))+
+  geom_point()+
+  geom_smooth(method='lm')
+
+ggplot(all,aes(x=treat_area, y=mdDNBR_sc,colour=Fire_ID))+
+  geom_point()+
+  geom_smooth(method='lm')
+
+ggplot(all,aes(x=Md_DOB, y=mdDNBR_sc,colour=Fire_ID))+
+  geom_point()+
+  geom_smooth(method='lm')
+
+ggplot(all,aes(x=PlantAge, y=mdDNBR_sc,colour=Fire_ID))+
+  geom_point()+
+  geom_smooth(method='lm')
+
+ggplot(all[Fire_ID=="Island"],aes(x=Md_DOB, y=mdDNBR_sc,colour=Burn))+
+  geom_point()
+  #geom_smooth(method='lm')
+
+#Full
+AIC(lmer(mdDNBR_sc ~ Burn * PlantAge + DEM_tpi + BA_VRI + DEM_hli + cov  +(1|Fire_ID),
+             data = all[Fire_ID=="Nadina"|Fire_ID=="Shovel"]))
+AIC(lmer(mdDNBR_sc ~ Burn + DEM_tpi + BA_VRI + DEM_hli + cov  +(1|Fire_ID),
+             data = all[Fire_ID=="Nadina"|Fire_ID=="Shovel"]))
+rsq.glmm(full)
+#No random effect on fire
+AIC(glm(mdDNBR_sc ~ Burn + PlantAge + DEM_tpi + BA_VRI + DEM_hli + Md_DOB + cov , data = all))
+#Burn area instead of burn treatment
+summary(glm(mdDNBR_sc ~ Burn + PlantAge + DEM_tpi + BA_VRI + DEM_hli + Md_DOB + cov , data = all))
+#No burn treatment
+AIC(glm(mdDNBR_sc ~ PlantAge + DEM_tpi + BA_VRI + DEM_hli + Md_DOB + cov, data = all))
+#No plantation age 
+AIC(glm(mdDNBR_sc ~ DEM_tpi + BA_VRI + DEM_hli + Md_DOB + cov, data = all))
+
+#No topography or day of burn (factors important in fire behaviour)
+AIC(glm(mdDNBR_sc ~ Burn + PlantAge + BA_VRI + cov, data = all))
+#No forest cover
+AIC(glm(mdDNBR_sc ~ Burn + PlantAge + DEM_tpi+ DEM_hli + Md_DOB, data = all))
+#just age 
+AIC(glm(mdDNBR_sc ~ PlantAge + DEM_tpi + BA_VRI + DEM_hli + Md_DOB + cov, data = all))
+
+AIC(glm(mdDNBR_sc ~ DEM_tpi, data = all))
+AIC(glm(mdDNBR_sc ~ 1 , data = all))
+AIC(lmer(mdDNBR_sc ~ 1 + (1|Fire_ID), data = all))
+AIC(lmer(mdDNBR_sc ~ Burn + (1|Fire_ID), data = all))
+
+
+
+AIC(glm(Mn_dNBR ~ Burn + DEM_tpi + BA_VRI + DEM_hli + Md_DOB + cov, data = all))
+
+
+
+summary(glm(Mn_dNBR ~ Burn + PlantAge + DEM_tpi + BA_VRI + DEM_hli + Md_DOB + cov + treat_area, data = all))
+summary(glm(Mn_dNBR ~ PlantAge + DEM_tpi + BA_VRI + DEM_hli + Md_DOB + cov + treat_area, data = all))
+
+
+#No DOB, cov, hli
+AIC(glm(Mn_dNBR ~ Burn-1 + PlantAge + DEM_tpi + BA_VRI, data = all))
+#No DOB, cov, hli
+AIC(glm(Mn_dNBR ~ Burn-1 + PlantAge + DEM_tpi + BA_VRI + treat_area, data = all))
+#No DOB, cov, hli
+AIC(glm(Mn_dNBR ~ PlantAge + DEM_tpi + BA_VRI, data = all))
+
+
+mod1 <- glm(Mn_dNBR ~ Burn + PlantAge + DEM_tpi + BA_VRI + DEM_hli + Md_DOB + cov + Fire_ID, data = all)
+mod2 <- glm(Mn_dNBR ~ Burn + PlantAge + DEM_tpi+BA_VRI, data = all, family = gaussian)
+mod3 <- glm(Mn_dNBR ~ Burn + PlantAge + DEM_tpi+BA_VRI+treat_area, data = all, family = gaussian)
+
+
+mod1 <- glm(Sev~Burn+Age+Dem+Bas+Asp+fire+dob+cov, data = all, family = gaussian)
+mod2 <- glm(Sev~Burn+Age+Dem+Bas, data = all, family = gaussian)
+mod3 <- glm(Sev~Burn+Age+Dem+Bas+t_area, data = all, family = gaussian)
+
+
+
+summary(mod1)
+summary(mod2)
+summary(mod3)
+
+summary(mod1)$coef
+summary(mod2)$coef
+summary(mod3)$coef
+
+#assessing deviance
+1 - pchisq(deviance(identity),df.residual(identity))
+
+print(identity)
+
+confint(mod1)
+coef(mod1)
+
+#looking at the spread of the data
+gg_jitter <- ggplot(data = all, aes(x = Sev, y = Dem)) + 
+  geom_jitter(width = 0, height = 0.05) +
+  ylab("TPI") +
+  xlab("Fire severity (dNBR)")
+
+gg_jitter
+
+options(na.action = "na.fail")
+dredge(mod1)
+
+
+get.models(identity)
+stepAIC(identity)
+
+#95% CI slope
+confint(mod2)
+confint(mod3)
+#compare the res sum of square
+anova(mod2)
+anova(mod3)
+
 
 
 ```
