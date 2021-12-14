@@ -3,7 +3,7 @@ library(raster)
 library(sf)
 
 #create raster extent
-BCbound <- read_sf("F:/Spatial Data/Administrative boundaries/BC_boundary_poly2.shp")
+BCbound <- read_sf("E:/Spatial Data/Administrative/BC/ABMS_PROVINCE_SP/ABMS_PROV_polygon.shp")
 t <- raster(extent(BCbound), res=c(30,30), crs=crs(BCbound))
 
 #each fire is stored in folders with names

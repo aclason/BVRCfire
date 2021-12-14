@@ -46,13 +46,13 @@ library(lubridate)
 # Note this is set up to run on the MTBS fire history shapefile
 
 	#setwd('D:/temp/sample.DOB.code/sample.fire.history.atlas')
-	fire.perims <- st_read("./Inputs/Study_fire_perimeters.shp")
+	fire.perims <- st_read("./Inputs/Shapefiles/Study_fire_perimeters.shp")
 	fire.perims <- st_transform(fire.perims, '+proj=longlat +datum=WGS84 +no_defs')
+	fire.perims <- fire.perims %>% dplyr::filter(FIRE_YEAR==2018)
 
 
 # Year of fires. You will need to modify this file if you have several years to process
-	#year <- fire.perims$Year[1]
-  year <- 2017
+	year <- 2018
 
 # Set the output pixel size here. Canadian folk might want to consider 100 or 200 m.
 

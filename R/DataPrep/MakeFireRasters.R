@@ -5,21 +5,19 @@ library(sf)
 library(stringr)
 library(readr)
 st_erase = function(x, y) st_difference(x, st_union(st_combine(y)))
-PerResultsOverlap <- 0.25
-# You can run this whole thing as a function, 
-# but really I set it up this way to be very explicit about what inputs are needed
+SpatialFilesPath <- "E:/"
+study_fireTable <- fread("./Inputs/StudyFireList.csv")
 
-MakeFireDataTable <- function(study_fireTable,PerResultsOverlap,fire_perimeters,Results_All,VRI_study){
-
-#### All fire perimeters:
+##### Fire perimeters #####
+fire_perimeters <- read_sf(paste0(SpatialFilesPath,
+                                  "Spatial Data/Fire/Historical wildfire perimeters/BC Wildfire Historical Fire Perimeters.shp",quiet=TRUE))
 fire_per_sel <- fire_perimeters %>%
   dplyr::select(FIRE_NUMBE,FIRE_YEAR,FIRE_CAUSE)
-
-#### Severity mapping (all 2015-2018):
-severity_sel <- severity %>%
-  dplyr::select(FIRE_NUMBE,FIRE_YEAR,BURN_SEVER)
-
+StudyFirePerims <- fire_per_sel %>% dplyr::filter(.,FIRE_NUMBE %in% study_fireTable$FireID)
+write_sf(StudyFirePerims,"./Inputs/Shapefiles/study_fireTable.shp")
 #### Results:
+Results_All <- read_sf(paste0(SpatialFilesPath,
+                              "Spatial Data/RESULTS/RESULTS_FirePerimeter_Intersect.shp",quiet=T))
 Results_sel <- Results_All %>%
   dplyr::select(OPENING_ID,OPENING_ST,APPROVE_DA,DISTURBANC,DISTURBA_1,DENUDATION, DENUDATI_1, 
                 DENUDATI_2, DENUDATI_3,
@@ -28,23 +26,10 @@ Results_sel <- Results_All %>%
                 PLANTING_3, PLANTING_4, PLANTING_5, PLANTING_6, PLANTING_C ,BRUSHING_T,BRUSHING_1, BRUSHING_C,
                 BRUSHING_2 ,SPACING_TR, SPACING_CO ,SPACING__1, FERTILIZAT,FERTILIZ_1, FERTILIZ_2, PRUNING_TR,
                 PRUNING_CO ,PRUNING__1,SLOPE,ASPECT)
-##### do you want to add x y coordinate to the data? If yes, 
-AddXY2DT <- "no"
-if(AddXY2DT=="yes"){
-  Results_All <- read_sf("E:/Spatial Data/RESULTS/RESULTS_FirePerimeter_Intersect.shp",
-                         quiet=T)
-  Results_sel <- Results_All %>%
-    dplyr::select(OPENING_ID,OPENING_ST,APPROVE_DA,DISTURBANC,DISTURBA_1,DENUDATION, DENUDATI_1, 
-                  DENUDATI_2, DENUDATI_3,
-                  DENUDATI_4,DENUDATI_5,DENUDATI_6,DENUDATI_7, DENUDATI_8, DENUDATI_9, DENUDAT_10, SITE_PREP_,
-                  SITE_PREP1, SITE_PRE_1, SITE_PRE_2, SITE_PRE_3, SITE_PRE_4 ,SITE_PRE_5, PLANTING_1,PLANTING_2,
-                  PLANTING_3, PLANTING_4, PLANTING_5, PLANTING_6, PLANTING_C ,BRUSHING_T,BRUSHING_1, BRUSHING_C,
-                  BRUSHING_2 ,SPACING_TR, SPACING_CO ,SPACING__1, FERTILIZAT,FERTILIZ_1, FERTILIZ_2, PRUNING_TR,
-                  PRUNING_CO ,PRUNING__1,SLOPE,ASPECT)
-}
 
 
 #### VRI:
+VRI_study <- st_read(paste0(SpatialFilesPath,"/Spatial Data/VRI/2016/VRI2016_StudyFires.gdb"))
 VRI_study_sel <- VRI_study %>%
   dplyr::select(FEATURE_ID,  MAP_ID, POLYGON_ID, OPENING_IN, OPENING_SO, OPENING_NU, OPENING_ID, BASAL_AREA, 
                 CROWN_CLOS, CROWN_CL_1,FREE_TO_GR,HARVEST_DA,PROJ_AGE_1,PROJ_AGE_C,PROJ_AGE_2,PROJ_AGE_3,
@@ -109,14 +94,11 @@ rm(VRI_study)
 gc()
 
 #Fires in the study:
-Study_fire_perimeters <- as.data.table(fire_per_sel)[FIRE_NUMBE %in% c(study_fireTable[,FireID])]
 r_t_dat_p_Notself <- list()
 FireSevSum_PlantList <- list()
 #split out by fire to reduce data in memory
-c()
 for(i in 1:length(study_fireTable$FireID)){
-  Fire <- st_as_sf(Study_fire_perimeters %>% 
-                      filter(FIRE_NUMBE == study_fireTable[i,FireID]))
+  Fire <- st_as_sf(StudyFirePerims %>% filter(FIRE_NUMBE == study_fireTable[i,FireID]))
   
   ####### RESULTS ########
   Fire_Results <- Results_sel %>% 
@@ -295,49 +277,6 @@ for(i in 1:length(study_fireTable$FireID)){
     #PlantationsArea <- st_cast(st_union(st_as_sf(Plantations)),"MULTIPOLYGON")
 
     ########################
-    ####### SEVERITY ########
-    Fire_Sev <- severity_sel %>% filter(FIRE_NUMBE == study_fireTable[i,FireID])
-    #For every fire, calculate the area of each severity polygon
-    Fire_Sev$FireSevArea <- st_area(Fire_Sev)
-    Fire_SevDT <- as.data.table(Fire_Sev)
-    FireSevSum <- Fire_SevDT[,.(FireSevArea= round(sum(unclass(FireSevArea)/10000),0)),by=c("FIRE_NUMBE","BURN_SEVER")]
-    
-    #For every plantation, we can calculate the proportion burned in each category
-    Fire_sev_res <- st_intersection(st_buffer(Plantations_sf,0),st_buffer(Fire_Sev,0))
-    Fire_sev_res$ResSevArea <- st_area(Fire_sev_res)
-    
-    #Make burn severity classes columns
-    Fire_sev_res_dat <- as.data.table(Fire_sev_res)
-    BurnSev_prop_calcl <- Fire_sev_res_dat[,sum(unclass(ResSevArea)),
-                                            by=.(OPENING_ID,BURN_SEVER)][,.(BURN_SEVER,BU_SV_P=prop.table(V1)),
-                                                                         OPENING_ID]
-    BurnSev_prop_calcl_d <- dcast(BurnSev_prop_calcl,OPENING_ID~BURN_SEVER,value.var="BU_SV_P")
-    #If any of the burn severity levels are not present, add the missing ones here
-    BurnLevels <- c("Unburned","Low","Medium","High")
-    if(all(BurnLevels %in% unique(BurnSev_prop_calcl[,BURN_SEVER]))){
-      BurnSev_prop_calcl_d <- BurnSev_prop_calcl_d
-    }else{
-      BurnSev_prop_calcl_d <- BurnSev_prop_calcl_d[,BurnLevels[which(!BurnLevels %in% 
-                                                                      unique(BurnSev_prop_calcl[,BURN_SEVER]))]:=0]
-    }
-    Fire_Results_PropSev <- merge(Plantations_sf,BurnSev_prop_calcl_d, by="OPENING_ID")
-    Plantations <- as.data.table(Fire_Results_PropSev)
-    
-    ####### Making sure the severity is 0 if there was none (not NA)
-    Plantations[,High:= ifelse(is.na(High),0,High)]
-    Plantations[,Medium:= ifelse(is.na(Medium),0,Medium)]
-    Plantations[,Low:= ifelse(is.na(Low),0,Low)]
-    Plantations[,Unburned:= ifelse(is.na(Unburned),0,Unburned)]
-    
-    Plantations_sf <- st_as_sf(Plantations)
-    # Severity by class across total plantation area (unioned together to account for spatial overlaps)
-   # Fire_sev_resComb <- st_intersection(st_buffer(st_as_sf(PlantationsArea),0),st_buffer(Fire_Sev,0))
-  #  Fire_sev_resComb$SevOpenings <- st_area(Fire_sev_resComb)
-  #  Fire_sev_resComb_DT <- as.data.table(Fire_sev_resComb)
-  #  FireSevPlantSum <- Fire_sev_resComb_DT[,.(PlantAreaSev =round(sum(unclass(SevOpenings)/10000),0)),
-   #                                        by=c("FIRE_NUMBE","BURN_SEVER")]
-    #FireSevSum_PlantList[[i]] <- merge(FireSevSum,FireSevPlantSum,by=c("FIRE_NUMBE","BURN_SEVER"), all=TRUE)
-    
     ###############################################
     ##### PREVIOUS FOREST COVER PLANTATIONS ######
     Fire_VRI <- VRI_study_sel %>%
@@ -356,14 +295,6 @@ for(i in 1:length(study_fireTable$FireID)){
                     HeightVRI = mean(na.omit(PROJ_HEIGH)),BA_VRI = mean(na.omit(BASAL_AREA))),by="OPENING_ID"]
     Plantations_sf <- merge(Plantations_sf,VRI_Avg, by="OPENING_ID")
     
-    #############################  
-    ############# dNBR ##########
-    dNBR <- raster(paste0("./Inputs/Rasters/dNBR_",study_fireTable[i,FireID],".tif"))
-    dNBR_plant <- raster::extract(dNBR, Plantations_sf, fun=median, na.rm=TRUE)
-    Plantations_sf$Mn_dNBR <- dNBR_plant
-    Plantations_sf <- st_cast(Plantations_sf, to="MULTIPOLYGON")
-    Plantations <- as.data.table(Plantations_sf)
-    
     ###############################
     ###### SUMMARIZING TREATMENTS (0,1) ########
     Plantations[,Spaced := ifelse(SPACING__1==0,0,1)]
@@ -380,15 +311,21 @@ for(i in 1:length(study_fireTable$FireID)){
                                    ifelse(DENUDATI_1=="CLEAR"|DENUDATI_1=="CCRES"|
                                             DENUDATI_6=="CLEAR"|DENUDATI_6=="CCRES", "CC","PC"))]
     Plantations[is.na(HarvType)]$HarvType <- "PC" #i can't figure out why the else above isn't working
-    ############################
-    ##### Clean up the plantations dataset and drop columns no longer needed
     
+    ##### Clean up the plantations dataset and drop columns no longer needed
     Plantations <- Plantations[,.(OPENING_ID,PlantAge, Reburn, High, Low,Medium,Unburned,
                                   DecVRICov, ConVRICov, PineVRICov, FirVRICov, SpruVRICov, DFirVRICov,
                                   CanopCloVRI, AgeVRI, HeightVRI, BA_VRI, Mn_dNBR, Spaced, Brushed,
                                   SitePrepped, Fertil, Prune, Planted, NumDenuda, HarvType, geometry)]
     Plantations_sf <- st_as_sf(Plantations)
     
+    #############################  
+    ############# dNBR ##########
+    dNBR <- raster(paste0("./Inputs/Rasters/dNBR_",study_fireTable[i,FireID],".tif"))
+    dNBR_plant <- raster::extract(dNBR, Plantations_sf, fun=median, na.rm=TRUE)
+    Plantations_sf$Mn_dNBR <- dNBR_plant
+    Plantations_sf <- st_cast(Plantations_sf, to="MULTIPOLYGON")
+    Plantations <- as.data.table(Plantations_sf)
     
     ########################################
     ###### SURROUNDING FOREST CONTEXT ######
@@ -483,13 +420,6 @@ for(i in 1:length(study_fireTable$FireID)){
     SurForestAll <- rbindlist(SurForestList, fill=TRUE)
     Plantations <- merge(Plantations,SurForestAll, by="OPENING_ID") #check that we don't lose any here.
     Plantations_sf <- st_as_sf(Plantations)
-    
-    ##### NOT-MANAGED YOUNG STANDS #######
-    #Plant2Erase <-st_union(st_combine(Fire_Results_PropSev))
-    #YoungVRI_NoPlant <- st_difference(st_buffer(Fire_VRI,0), st_buffer(YoungVRI_NoPlant,0))
-    #write_sf(YoungVRI_NoPlant,"YoungVRI_NoPlant.shp")
-    #YoungVRi <- YoungVRI_NoPlant %>%
-      #filter(PROJ_AGE_1<80)
     
     #############################      
     ##### PREVIOUS FIRES ######
@@ -672,4 +602,3 @@ AddSitePrep <- function(){
               paste0("./Outputs/IndividualFires/",FiresOfInterest[ii],"_Firedat_SP.csv"),
               row.names = FALSE)
   }
-}

@@ -1,6 +1,6 @@
 library(data.table)
-#library(dplyr)
-#library(raster)
+library(dplyr)
+library(raster)
 library(sf)
 #library(stringr)
 #library(readr)
