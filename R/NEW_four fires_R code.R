@@ -15,7 +15,7 @@ library(data.table)
 ## ANALYSIS
 
 #set the fires of interest
-study_fireTable <- fread("/Users/Kira/Desktop/BVRCfire-main 4/Inputs/StudyFireList.csv") #all potential
+study_fireTable <- fread("./Inputs/StudyFireList.csv") #all potential
 
 study_fireTable
 
@@ -24,7 +24,7 @@ FiresOfInterest <- c( "R11796","R11498","R21721","R11921")
 dt <- data.table()
 Plantations <- data.table()
 for(j in 1:length(FiresOfInterest)){
-  dt <- fread(paste0("/Users/Kira/Desktop/BVRCfire-main 4/Outputs/IndividualFires/",FiresOfInterest[j],"_Firedat_SP.csv"))
+  dt <- fread(paste0("./Outputs/IndividualFires/",FiresOfInterest[j],"_Firedat_SP.csv")) # Alana needs to push "IndividualFires" to github
   dt[, ':='(FireID = FiresOfInterest[j])]
   dt[,.N,by=OPENING_ID]
   dt[,.N]
