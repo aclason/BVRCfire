@@ -1,4 +1,8 @@
-#dNBR data cleaning
+#dNBR processing script
+# Author: Alana Clason (alana.clason@bvcentre.ca)
+# Date: 11/05/2021
+
+
 library(raster)
 library(sf)
 

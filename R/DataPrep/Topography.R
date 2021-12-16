@@ -23,10 +23,6 @@ dem_studyFires <- raster::mask(dem, Study_fires)
 #dem_studyFires <- raster("./Inputs/Rasters/dem_studyFires.asc")
 #make larger cells
 dem_studyFires300 <- aggregate(dem_studyFires, fact=10, fun=mean)
-dem_list <- list()
-for(j in 1:length(Fire_shortList)){
-  dem_list[[j]] <- raster::mask(dem_studyFires, Study_fires %>% filter(FIRE_NUMBE==Fire_shortList[j]))
-}
 
 ### fire-level metrics
 

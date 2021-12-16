@@ -1,23 +1,28 @@
 library(data.table)
 library(dplyr)
+library(plyr)
 library(raster)
+library(fasterize)
 library(sf)
 library(stringr)
 library(readr)
 st_erase = function(x, y) st_difference(x, st_union(st_combine(y)))
 SpatialFilesPath <- "E:/"
 study_fireTable <- fread("./Inputs/StudyFireList.csv")
+dNBR_imageryDates <- fread("./Inputs/dNBR_dates.csv")
+SitePrepGroups <- fread("./Inputs/SitePrep_TypeMethods.csv")
 
 ##### Fire perimeters #####
 fire_perimeters <- read_sf(paste0(SpatialFilesPath,
-                                  "Spatial Data/Fire/Historical wildfire perimeters/BC Wildfire Historical Fire Perimeters.shp",quiet=TRUE))
+                                  "Spatial Data/Fire/Historical wildfire perimeters/BC Wildfire Historical Fire Perimeters.shp"),quiet=TRUE)
 fire_per_sel <- fire_perimeters %>%
   dplyr::select(FIRE_NUMBE,FIRE_YEAR,FIRE_CAUSE)
 StudyFirePerims <- fire_per_sel %>% dplyr::filter(.,FIRE_NUMBE %in% study_fireTable$FireID)
-write_sf(StudyFirePerims,"./Inputs/Shapefiles/study_fireTable.shp")
+
+
 #### Results:
 Results_All <- read_sf(paste0(SpatialFilesPath,
-                              "Spatial Data/RESULTS/RESULTS_FirePerimeter_Intersect.shp",quiet=T))
+                              "Spatial Data/RESULTS/RESULTS_FirePerimeter_Intersect.shp"),quiet=T)
 Results_sel <- Results_All %>%
   dplyr::select(OPENING_ID,OPENING_ST,APPROVE_DA,DISTURBANC,DISTURBA_1,DENUDATION, DENUDATI_1, 
                 DENUDATI_2, DENUDATI_3,
@@ -29,7 +34,7 @@ Results_sel <- Results_All %>%
 
 
 #### VRI:
-VRI_study <- st_read(paste0(SpatialFilesPath,"/Spatial Data/VRI/2016/VRI2016_StudyFires.gdb"))
+VRI_study <- read_sf(paste0(SpatialFilesPath,"/Spatial Data/VRI/2016/BVRCfire_VRI2016.shp"))
 VRI_study_sel <- VRI_study %>%
   dplyr::select(FEATURE_ID,  MAP_ID, POLYGON_ID, OPENING_IN, OPENING_SO, OPENING_NU, OPENING_ID, BASAL_AREA, 
                 CROWN_CLOS, CROWN_CL_1,FREE_TO_GR,HARVEST_DA,PROJ_AGE_1,PROJ_AGE_C,PROJ_AGE_2,PROJ_AGE_3,
@@ -88,7 +93,7 @@ VRI_sum_all <- merge(VRI_study_selDT[,.(FEATURE_ID)],VRI_sum,by="FEATURE_ID",all
 #convert n/a to 0 for conifer/deciduous cover?
 for (i in seq_along(VRI_sum_all)) set(VRI_sum_all, i=which(is.na(VRI_sum_all[[i]])), j=i, value=0)
 
-rm(severity)
+#rm(severity)
 rm(Results_All)
 rm(VRI_study)
 gc()
@@ -98,11 +103,16 @@ r_t_dat_p_Notself <- list()
 FireSevSum_PlantList <- list()
 #split out by fire to reduce data in memory
 for(i in 1:length(study_fireTable$FireID)){
-  Fire <- st_as_sf(StudyFirePerims %>% filter(FIRE_NUMBE == study_fireTable[i,FireID]))
-  
+  Fire <- st_as_sf(StudyFirePerims %>% dplyr::filter(FIRE_NUMBE == study_fireTable[i,FireID]))
+  #raster of fire perimeter
+  bb <- st_bbox(st_buffer(Fire, dist = 3000))
+  PlotSize <- raster(xmn=bb[1], xmx=bb[3], ymn=bb[2],ymx=bb[4],res=30, crs=crs(Fire))
+  Fire$FirePerim <- 1
+  FireRast <- fasterize(Fire,PlotSize, field="FirePerim", background=0)
+  plot(FireRast)
   ####### RESULTS ########
   Fire_Results <- Results_sel %>% 
-    filter(st_contains(Fire, ., sparse = FALSE)) #the fire had to fully contain the opening
+    dplyr::filter(st_contains(Fire, ., sparse = FALSE)) #the fire had to fully contain the opening
   if(nrow(Fire_Results)==0){
     print(paste("no RESULTS openings in fire",Fire$FIRE_NUMBE))
   } else {
@@ -230,7 +240,7 @@ for(i in 1:length(study_fireTable$FireID)){
     Activ <- ActivNamDates[!is.na(Activities)]
     setorderv(Activ, cols=c("OPENING_ID","Date"))
     Activ[,ActOrder:=seq(length(Date)),by="OPENING_ID"]
-    #length(unique(Activ$OPENING_ID))
+    
     #identify plantations with disturbances that would impact their age at time of fire
     ReBurnPlants <- Activ[Activities=="B" & Date < Fire_start] #Was there a burn before 2017/2018
     ReBurnPlantsOI <- unique(ReBurnPlants$OPENING_ID) #get those opening ids
@@ -256,27 +266,103 @@ for(i in 1:length(study_fireTable$FireID)){
     Plantations[is.na(PlantAge)]
     Plantations[PlantAge <0]
     Plantations <- Plantations[PlantAge > -1]
-    Plantations_sf <- st_as_sf(Plantations)
     
-    ######## OVERLAPS ##########
-    #Calculating the degree of overlap of results polygons
-    #Fire_Res_O <-  filter(st_intersection(st_buffer(Plantations_sf,0),
-                                          #st_buffer(Plantations_sf,0),sparse=FALSE))
-    #Fire_Res_O$Overlap_area <- st_area(Fire_Res_O) #area of overlapping polygon
-    #Plantations_sf$OpeningArea <- st_area(Plantations_sf) #area of the total results opening
-    #t_dat1 <- as.data.table(Fire_Res_O)[,.(OPENING_ID,OPENING_ID.1, OverlapResArea=unclass(Overlap_area))] 
-    #r_dat1 <- as.data.table(Plantations_sf)
-    #r_t_dat1 <- merge(r_dat1[,.(OPENING_ID, OpeningArea=unclass(OpeningArea))],t_dat1, by.x="OPENING_ID",by.y="OPENING_ID")
-    #r_t_dat_p1 <- r_t_dat1[, .(OPENING_ID.1=as.numeric(OPENING_ID.1),
-                              # PropResOverlap= OverlapResArea/OpeningArea), by="OPENING_ID"]
-    #setting the threshold for the minimum overlap in polygons at 25%, but this can be changed (see top of function)
-    #r_t_dat_p_Notself[[i]] <- r_t_dat_p1[OPENING_ID!=OPENING_ID.1 & PropResOverlap > PerResultsOverlap]
+    #############################################
+    ##### ADD DETAILED SP AND PLANTS #####
+    SitePrep <- data.table()
+    dt <- fread(paste0("./Outputs/IndFiresDat/",study_fireTable[i,FireID],"_Firedat_SitePrep_MethAdds.csv"),
+                  na.strings=c("","NA","<NA>"))
+      
+    cols <-c("SITE_PREP_","SITE_PRE_2",colnames(dt)[grepl("Type",colnames(dt))])
+    cols <- cols[grepl("SITE",cols)]
+    dt[, (cols):=lapply(.SD, as.factor),.SDcols=cols]
+    SitePrepType_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                              measure.vars = cols,
+                              variable.name = "SP",
+                              value.name = "SP_type",value.factor=TRUE)
     
-    #length(unique(Plantations$OPENING_ID))
-    #unioning the area to make one giant plantation polygon that won't double count overlapping area
-    #PlantationsArea <- st_cast(st_union(st_as_sf(Plantations)),"MULTIPOLYGON")
-
-    ########################
+    #Site prep method (pburn, trail, knock down etc.)
+    cols <- colnames(dt)[grepl("Meth",colnames(dt))]
+    cols <- cols[grepl("SITE",cols)]
+    dt[, (cols):=lapply(.SD, as.factor),.SDcols=cols]
+    SitePrepMeth_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                              measure.vars = cols,
+                              variable.name = "SP_",
+                              value.name = "SP_Method",value.factor=TRUE)
+    #Site prep date
+    cols <-c("SITE_PRE_1","SITE_PRE_4",colnames(dt)[grepl("Date",colnames(dt))])
+    cols <- cols[grepl("SITE",cols)]
+    dt[, (cols):=lapply(.SD,function(x) as.numeric(format(as.Date(x,tryFormats=c("%d/%m/%Y",
+                                                                                 "%d-%m-%Y",
+                                                                                 "%Y/%m/%d",
+                                                                                 "%Y-%m-%d")),"%Y"))),.SDcols=cols]
+    SitePrepDate_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                              measure.vars = cols,
+                              variable.name = "SP_3",
+                              value.name = "SP_Date")
+    SitePr <- SitePrepType_melt[,.(OPENING_ID,SP_type,
+                                   SP_Method = SitePrepMeth_melt[,SP_Method],
+                                   SP_Date = SitePrepDate_melt[,SP_Date])]
+    SitePr <- SitePr[, SP_type_meth:= paste0(SP_type,"_",SP_Method)]
+    SitePr[, ':='(FireID = study_fireTable[i,FireID])]
+    SitePrep <- rbind(SitePrep,SitePr,fill=TRUE)
+    
+    unique(SitePrep$SP_type_meth)
+    table(SitePrep$SP_type_meth) #WATCH THAT THERE ARE NO NEW COMBINATIONS WITH NEW DATA ENTERED!!
+    SitePrep[SP_type_meth=="BU_LRIP"]
+    
+    SitePrep[,SPgrUse:=1]
+    #SitePrep <- SitePrep[!is.na(SP_type)&!is.na(SP_Method)]
+    SitePrep[,.N,by="SP_type_meth"]
+    SitePrep[SP_type_meth=="ME_WINDP"]
+    #Bring in the grouping variable - only site preps of interest are kept
+    SitePrep <- merge(SitePrep,SitePrepGroups,by.x="SP_type_meth", by.y="Type_Method", all.x=TRUE)
+    SitePrep[!is.na(GroupName)]
+    SitePrepCast <- dcast(SitePrep[!is.na(GroupName)], OPENING_ID~GroupName, value.var ="SPgrUse",fun.aggregate=sum)
+    for (i in seq_along(SitePrepCast)) set(SitePrepCast, i=which(SitePrepCast[[i]]>0), j=i, value=1)
+    
+    #merge with the main dataset and make sure any opening without a value has a zero.
+    SitePrep2 <- merge(SitePrepCast,SitePrep[,.(OPENING_ID,FireID)], by="OPENING_ID", all.y=TRUE)
+    for (i in seq_along(SitePrep2)) set(SitePrep2, i=which(is.na(SitePrep2[[i]])), j=i, value=0)
+    SitePrep2<- unique(SitePrep2)
+    SitePrep2[which(duplicated(SitePrep2[,OPENING_ID]))]
+    
+    Plant_SP <- merge(Plantations,SitePrep2, by=c("OPENING_ID"), all.x=TRUE)
+    Plant_SP[,Spaced := ifelse(SPACING__1==0,0,1)]
+    Plant_SP[,Brushed := ifelse(BRUSHING_1==0,0,1)]
+    Plant_SP[,SitePrepped := ifelse(SITE_PRE_5==0,0,1)]
+    Plant_SP[,Fertil := ifelse(FERTILIZ_2==0,0,1)]
+    Plant_SP[,Prune := ifelse(PRUNING__1==0,0,1)]
+    Plant_SP[,Planted := ifelse(PLANTING_C==0,0,1)]
+    Plant_SP_sf <- st_as_sf(Plant_SP[,.(OPENING_ID,PlantAge,BroadBurn,DebrisMade,DebrisPiled,MechUnk,None,
+                                        PileBurn, Soil, SpotBurn,WBurn,Spaced,Brushed, SitePrepped,
+                                        Fertil,Prune,Planted,geometry)])
+    
+    plot(fasterize(Plant_SP_sf %>% dplyr::select("OPENING_ID"),FireRast))
+    plot(fasterize(Plant_SP_sf %>% dplyr::select("PlantAge"),FireRast))
+    plot(fasterize(Plant_SP_sf %>% dplyr::select("BroadBurn"),FireRast))
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    # Identify the runs - across the whole fire
+    #### number of pixels that burned
+    
+    #at what severity
+    
+    #early progression vs late progression
+    
+    
+    
+    
+    
+    
     ###############################################
     ##### PREVIOUS FOREST COVER PLANTATIONS ######
     Fire_VRI <- VRI_study_sel %>%
@@ -313,9 +399,11 @@ for(i in 1:length(study_fireTable$FireID)){
     Plantations[is.na(HarvType)]$HarvType <- "PC" #i can't figure out why the else above isn't working
     
     ##### Clean up the plantations dataset and drop columns no longer needed
-    Plantations <- Plantations[,.(OPENING_ID,PlantAge, Reburn, High, Low,Medium,Unburned,
-                                  DecVRICov, ConVRICov, PineVRICov, FirVRICov, SpruVRICov, DFirVRICov,
-                                  CanopCloVRI, AgeVRI, HeightVRI, BA_VRI, Mn_dNBR, Spaced, Brushed,
+   # Plantations <- Plantations[,.(OPENING_ID,PlantAge, Reburn, High, Low,Medium,Unburned,
+    #                              DecVRICov, ConVRICov, PineVRICov, FirVRICov, SpruVRICov, DFirVRICov,
+     #                             CanopCloVRI, AgeVRI, HeightVRI, BA_VRI, Mn_dNBR, Spaced, Brushed,
+      #                            SitePrepped, Fertil, Prune, Planted, NumDenuda, HarvType, geometry)]
+    Plantations <- Plantations[,.(OPENING_ID,PlantAge, Reburn, Spaced, Brushed,
                                   SitePrepped, Fertil, Prune, Planted, NumDenuda, HarvType, geometry)]
     Plantations_sf <- st_as_sf(Plantations)
     
@@ -326,108 +414,17 @@ for(i in 1:length(study_fireTable$FireID)){
     Plantations_sf$Mn_dNBR <- dNBR_plant
     Plantations_sf <- st_cast(Plantations_sf, to="MULTIPOLYGON")
     Plantations <- as.data.table(Plantations_sf)
+    Plantations[,dNBR_sc:= Mn_dNBR*1000]
     
-    ########################################
-    ###### SURROUNDING FOREST CONTEXT ######
-    # For every plantation, what is the severity, and forest composition including plantations surrounding it
-    OpeningBuff <- st_buffer(Plantations_sf, 100) #this is the plantation buffer
-    SurForestList <- list()
-    for(k in 1:nrow(OpeningBuff)){
-      OpenDonut <- st_erase(st_buffer(OpeningBuff[k,],0),st_buffer(Plantations_sf[k,],0))
-      #intersect with VRI
-      SurVRI <- merge(st_intersection(st_buffer(OpenDonut[,c("OPENING_ID","geometry")],0),
-                                      st_buffer(Fire_VRI,0)),VRI_sum_all, by="FEATURE_ID")
-      SurVRI$VRIarea <- st_area(SurVRI)
-      SurVRIDT <- as.data.table(SurVRI[,c("OPENING_ID","FEATURE_ID","BASAL_AREA","CROWN_CLOS","PROJ_AGE_C",
-                                          "conifCov","decidCov", "PineCov","VRIarea")])
-      SurVRIDT <- SurVRIDT[,.(OPENING_ID,SurFID=FEATURE_ID, SurBA=BASAL_AREA, SurCrClos=CROWN_CLOS,
-                              SurAge=PROJ_AGE_C,SurConCov = conifCov, SurDecCov= decidCov,
-                              SurPineCov=PineCov, SurVRIarea=unclass(VRIarea))][,PrSev:=SurVRIarea/sum(SurVRIarea)]
-      SurVRIDT[,SurAgeCl:=ifelse(SurAge<2,"Y",ifelse(SurAge<6,"IM","M"))] #making age classes
-      SurVRIDT[,SurConCovCl:=ifelse(SurConCov==0 & is.na(SurAge),"NF",
-                                    ifelse(SurConCov==0,"Dec",
-                                    ifelse(SurConCov<51,"50_50",
-                                           ifelse(SurConCov<76,"75Con","Con"))))]
-      SurVRIDT[,SurPineCl:=ifelse(SurPineCov==0 & is.na(SurAge),"NF",
-                                    ifelse(SurPineCov==0,"NotPine",
-                                           ifelse(SurPineCov<51,"PineMix",
-                                                  ifelse(SurPineCov<76,"75Pine","Pine"))))]#I might swith this to mean Pine cover
-      SurForType <-SurVRIDT[,.(PrAgeFT=sum(PrSev)),by=c("OPENING_ID","SurAgeCl","SurConCovCl")]
-      SurForType[,SurAgeFT:=paste0("Sur",SurAgeCl,"-",SurConCovCl)]
-      SurForest1 <- dcast(SurForType, OPENING_ID~SurAgeFT, value.var = "PrAgeFT")
-      SurForest1[, SurCrClos := mean(SurVRIDT$SurCrClos)][,SurBA := mean(SurVRIDT$SurCrClos)]
-      
-      SurPineFor <- SurVRIDT[,.(PrAgePine=sum(PrSev)),by=c("OPENING_ID","SurAgeCl","SurPineCl")]
-      SurPineMat <- SurPineFor[SurAgeCl=="M" & SurPineCl != "NotPine" & SurPineCl != "NF"]
-      SurPineMat[,SurMatPine:=paste0("Sur",SurAgeCl,"-",SurPineCl)]
-      #there could be no pine, so need to put condition on dcast
-      if(nrow(SurPineMat)==0){
-        SurForest2 <- data.table(OPENING_ID=OpenDonut$OPENING_ID)
-      } else{
-        SurForest2 <- dcast(SurPineMat, OPENING_ID~SurMatPine, value.var = "PrAgePine")
-      }
-      SurForest <- merge(SurForest1, SurForest2, by="OPENING_ID")
-      #intersect with severity
-      SurSev <- st_intersection(st_buffer(OpenDonut[,c("OPENING_ID","geometry")],0),st_buffer(Fire_Sev,0))
-      SurSev$SevArea <- st_area(SurSev)
-      SurSevDT <- as.data.table(SurSev[,c("OPENING_ID","BURN_SEVER","SevArea")])
-      SurSevDT <- SurSevDT[,.(OPENING_ID,SurBurnSev = BURN_SEVER, SurSevArea=unclass(SevArea))]
-      SurSevDT <- SurSevDT[,.(TotSurSev = sum(SurSevArea)),
-                           by=c("OPENING_ID","SurBurnSev")][,.(OPENING_ID,
-                                                               SurBurnSev,
-                                                               PrSurSev=TotSurSev/sum(TotSurSev))]
-      SurSevDT[,SurBurnSev:=paste0("Sur-",SurBurnSev)]
-      SurForest3 <- dcast(SurSevDT, OPENING_ID~SurBurnSev, value.var = "PrSurSev")
-      SurForest <- merge(SurForest, SurForest3, by="OPENING_ID")
-      #intersect with dNBR
-      SurDNBR <- raster::extract(dNBR,OpenDonut, fun=median)
-      SurForest$sur_dNBR <- SurDNBR
-      
-      #intersect with results
-      Fire_ResNotSelf <- Fire_Results %>%
-        filter(OPENING_ID!= OpenDonut$OPENING_ID)
-      SurRes <- st_intersection(st_buffer(OpenDonut[,c("OPENING_ID","geometry")],0),st_buffer(Fire_ResNotSelf,0))
-      #there could be no plantations surrounding the opening
-      if(nrow(SurRes)==0){
-        SurForest4 <- data.table(OPENING_ID=OpenDonut$OPENING_ID)
-      } else {
-        SurRes$SurOpenArea <- st_area(SurRes)
-        SurRes$SurTotalArea <- st_area(OpenDonut)
-        SurResDT <- as.data.table(SurRes[,c("OPENING_ID","OPENING_ID.1","SurOpenArea","SurTotalArea")])
-        SurResDT<- SurResDT[,.(OPENING_ID,SurOpenID=OPENING_ID.1, SurOpenArea=unclass(SurOpenArea), 
-                               SurTotalArea=unclass(SurTotalArea))]
-        SurResDT[,PrSurOpen:=SurOpenArea/SurTotalArea]
-        #There can also be plantations from after the fire in the Fire_Results layer
-        if(nrow(Plantations[OPENING_ID %in% SurResDT$SurOpenID])==0){ 
-          SurForest4 <- data.table(OPENING_ID=OpenDonut$OPENING_ID) 
-        } else {
-          SurOpenDetails <- merge(Plantations[OPENING_ID %in% SurResDT$SurOpenID,.(OPENING_ID, 
-                                                           PlAgeCl = ifelse(PlantAge<=10,1,
-                                                                           ifelse(PlantAge<21,2,
-                                                                                  ifelse(PlantAge<31,3,
-                                                                                         ifelse(PlantAge<41,4,5)))),
-                                                           HarvType,SitePrepped)],SurResDT, by.x="OPENING_ID",
-                                  by.y="SurOpenID")
-          z <- SurOpenDetails[,.(PrSurPlant=sum(PrSurOpen)), by=c("OPENING_ID.y","PlAgeCl")][,.(OPENING_ID=OPENING_ID.y,
-                                                                                           PlAgeCl,PrSurPlant)]
-          z[,PlAgeCl:=paste0("Sur-AgeCl-",PlAgeCl)]
-          SurForest4 <- dcast(z, OPENING_ID~PlAgeCl, value.var = "PrSurPlant") #proportion of surrounding in plantation by age
-        }
-      }
-      SurForest <- merge(SurForest, SurForest4,by="OPENING_ID")
-      SurForestList[[k]] <- SurForest
-    }
-    SurForestAll <- rbindlist(SurForestList, fill=TRUE)
-    Plantations <- merge(Plantations,SurForestAll, by="OPENING_ID") #check that we don't lose any here.
-    Plantations_sf <- st_as_sf(Plantations)
     
     #############################      
     ##### PREVIOUS FIRES ######
     #Clip previous fires by current fire boundary
     Fire_Pfire <- fire_perimeters %>% 
-      filter(st_contains(Fire, ., sparse = FALSE)) %>% 
-      filter(FIRE_NUMBE != study_fireTable[i,FireID]) 
-    Fire_Pfire_res <-  filter(st_intersection(st_buffer(Plantations_sf,0),st_buffer(Fire_Pfire,0),sparse=FALSE))
+      dplyr::filter(st_contains(Fire, ., sparse = FALSE)) %>% 
+      dplyr::filter(FIRE_NUMBE != study_fireTable[i,FireID]) 
+    Fire_Pfire_res <-  dplyr::filter(st_intersection(st_buffer(Plantations_sf,0),
+                                                     st_buffer(Fire_Pfire,0),sparse=FALSE))
     Fire_Pfire_res$area <- st_area(Fire_Pfire_res) #area of the previous fire
     Plantations_sf$TotArea <- st_area(Plantations_sf) #area of the total results opening
     t_dat <- as.data.table(Fire_Pfire_res)[,.(OPENING_ID,FIRE_YEAR,FIRE_CAUSE, PFireArea=unclass(area))] 
@@ -466,24 +463,9 @@ for(i in 1:length(study_fireTable$FireID)){
     write_sf(Plantations_sf, paste0("./Outputs/IndividualFires/",study_fireTable$FireID[i],"_Fire.shp"))
     Plantations[,geometry:=NULL]
     write.csv(Plantations,paste0("./Outputs/IndividualFires/",study_fireTable$FireID[i],"_Firedat.csv"),row.names = FALSE)
-    #write.csv(Firedat[,.(OPENING_ID, SITEPr_1_Type = NA,SITE_PREP_, SITEPr_1_Meth = NA,SITE_PREP1, SITE_PRE_1,
-     #                   SITEPr_2_Type = NA, SITE_PRE_2, SITEPr_2_Meth = NA,SITE_PRE_3, SITE_PRE_4, SITE_PRE_5,
-      #                  SITEPr_3_Type=NA, SITEPr_3_Meth=NA, SITEPr_3_Area=NA,
-       #                 SITEPr_3_Date=NA, SITEPr_4_Type=NA, SITEPr_4_Meth=NA,  
-        #                SITEPr_4_Area=NA, SITEPr_4_Date=NA,PLANTING_1, PLANTING_2, PLANTING_3, 
-         #               PLANT_1_SP1 = NA, PLANT_1_NUM2 = NA,PLANT_1_SP2 = NA, PLANT_1_NUM2 = NA,
-          #              PLANTING_4, PLANTING_5, PLANTING_6, PLANT_2_SP1 = NA, PLANT_2_NUM1 = NA, 
-           #             PLANT_2_SP2 = NA, PLANT_2_NUM2 = NA, PLANTING_C, PLANT_3_Type=NA, 
-            #            PLANT_3_Meth=NA, PLANT_3_Area=NA, PLANT_3_Date =NA, PLANT_3_SP1 = NA,
-             #           PLANT_3_NUM1 = NA, PLANT_3_SP2 = NA, PLANT_3_NUM2 = NA)],
-              #paste0("./Outputs/IndividualFires/",study_fireTable$FireID[i],"_Firedat_SitePrep.csv"),row.names = FALSE)
-    }
+     }
   }
-  #FireSevSum_Plant <- rbindlist(FireSevSum_PlantList)
- # write.csv(FireSevSum_Plant,paste0("./Outputs/IndividualFires/PropBurnDat.csv"),row.names = FALSE)
-  #r_t_dat_p_Notself_ <- rbindlist(r_t_dat_p_Notself)
- # write.csv(r_t_dat_p_Notself_,paste0("./Outputs/IndividualFires/ResultsPolyOverlap.csv"),row.names = FALSE)
-}
+ 
 
 ##To Do - clean up above to leave what is needed to run for any paper
 #################################
@@ -522,83 +504,4 @@ RemYngPlants <- function(){
 }
 
 
-AddSitePrep <- function(){
-  ##### ADD DETAILED SP AND PLANTS #####
-  dt <- data.table()
-  SitePrep <- data.table()
-  for(i in 2:14){ #fire C50647 is missing 49 entries
-    dt <- fread(paste0("./Outputs/IndividualFires/",Fire_shortList[i],"_Firedat_SitePrep_MethAdds.csv"),
-                na.strings=c("","NA","<NA>"))
-    
-    cols <-c("SITE_PREP_","SITE_PRE_2",colnames(dt)[grepl("Type",colnames(dt))])
-    cols <- cols[grepl("SITE",cols)]
-    dt[, (cols):=lapply(.SD, as.factor),.SDcols=cols]
-    SitePrepType_melt <- melt(dt, id.vars = c("OPENING_ID"),
-                              measure.vars = cols,
-                              variable.name = "SP",
-                              value.name = "SP_type",value.factor=TRUE)
-    
-    #Site prep method (pburn, trail, knock down etc.)
-    cols <- colnames(dt)[grepl("Meth",colnames(dt))]
-    cols <- cols[grepl("SITE",cols)]
-    dt[, (cols):=lapply(.SD, as.factor),.SDcols=cols]
-    SitePrepMeth_melt <- melt(dt, id.vars = c("OPENING_ID"),
-                              measure.vars = cols,
-                              variable.name = "SP_",
-                              value.name = "SP_Method",value.factor=TRUE)
-    #Site prep date
-    cols <-c("SITE_PRE_1","SITE_PRE_4",colnames(dt)[grepl("Date",colnames(dt))])
-    cols <- cols[grepl("SITE",cols)]
-    dt[, (cols):=lapply(.SD,function(x) as.numeric(format(as.Date(x,tryFormats=c("%d/%m/%Y",
-                                                                                 "%d-%m-%Y",
-                                                                                 "%Y/%m/%d",
-                                                                                 "%Y-%m-%d")),"%Y"))),.SDcols=cols]
-    SitePrepDate_melt <- melt(dt, id.vars = c("OPENING_ID"),
-                              measure.vars = cols,
-                              variable.name = "SP_3",
-                              value.name = "SP_Date")
-    
-    
-    SitePr <- SitePrepType_melt[,.(OPENING_ID,SP_type,
-                                   SP_Method = SitePrepMeth_melt[,SP_Method],
-                                   SP_Date = SitePrepDate_melt[,SP_Date])]
-    SitePr <- SitePr[, SP_type_meth:= paste0(SP_type,"_",SP_Method)]
-    SitePr[, ':='(FireID = Fire_shortList[i])]
-    SitePrep <- rbind(SitePrep,SitePr,fill=TRUE)
-  }
-  unique(SitePrep$SP_type_meth)
-  table(SitePrep$SP_type_meth) #WATCH THAT THERE ARE NO NEW COMBINATIONS WITH NEW DATA ENTERED!!
-  SitePrep[SP_type_meth=="BU_LRIP"]
-  
-  SitePrep[,SPgrUse:=1]
-  #SitePrep <- SitePrep[!is.na(SP_type)&!is.na(SP_Method)]
-  SitePrep[,.N,by="SP_type_meth"]
-  SitePrep[SP_type_meth=="ME_WINDP"]
-  #Bring in the grouping variable - only site preps of interest are kept
-  SitePrep <- merge(SitePrep,SitePrepGroups,by.x="SP_type_meth", by.y="Type_Method", all.x=TRUE)
-  SitePrep[!is.na(GroupName)]
-  SitePrepCast <- dcast(SitePrep[!is.na(GroupName)], OPENING_ID~GroupName, value.var ="SPgrUse",fun.aggregate=sum)
-  for (i in seq_along(SitePrepCast)) set(SitePrepCast, i=which(SitePrepCast[[i]]>0), j=i, value=1)
-  
-  #merge with the main dataset and make sure any opening without a value has a zero.
-  SitePrep2 <- merge(SitePrepCast,SitePrep[,.(OPENING_ID,FireID)], by="OPENING_ID", all.y=TRUE)
-  for (i in seq_along(SitePrep2)) set(SitePrep2, i=which(is.na(SitePrep2[[i]])), j=i, value=0)
-  SitePrep2<- unique(SitePrep2)
-  SitePrep2[which(duplicated(SitePrep2[,OPENING_ID]))]
-  #write.csv(SitePrep,"./Inputs/SitePrep.csv",row.names = FALSE)
-  
-  Plant_SP <- merge(Plantations,SitePrep2, by=c("OPENING_ID","FireID"), all.x=TRUE)
-  #missing results data from 50 openings in C50647 - would take 30 minutes to do
-  Plant_SP <- Plant_SP[!is.na(BroadBurn),] #need to update this when add those openings
-  cols <- c("BroadBurn", "DebrisBurn","DebrisMade","DebrisPiled","DebrisPiledBurn","Soil","WildBurn","MechUnk")
-  #change the site prep method columns to factors
-  Plant_SP[,(cols):=lapply(.SD, as.factor),.SDcols=cols] #make sure site prep methods are factors
-  #write out the full csvs with site prep methods added
-  FiresOfInterest <- c("C20735","C50744","C20729","C10784","C10970", "R11796",
-                       "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
-  #write a csv for each fire to file
-  for(ii in 1:length(FiresOfInterest)){
-    write.csv(Plant_SP[FireID==FiresOfInterest[ii]],
-              paste0("./Outputs/IndividualFires/",FiresOfInterest[ii],"_Firedat_SP.csv"),
-              row.names = FALSE)
-  }
+
