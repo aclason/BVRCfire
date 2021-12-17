@@ -20,14 +20,7 @@ dem_studyFires <- raster::mask(dem, Study_fires)
 #writeRaster(dem_studyFires,"./Inputs/Rasters/dem_studyFires.asc")
 ########################################################
 #### Start here with reprojected DEM for study area ####
-#dem_studyFires <- raster("./Inputs/Rasters/dem_studyFires.asc")
-#make larger cells
-dem_studyFires300 <- aggregate(dem_studyFires, fact=10, fun=mean)
-
 ### fire-level metrics
-
-### characterizing openings
-dem_studyFires <- raster("./Inputs/Rasters/dem_studyFires.tif")
 #slope
 DEMslope <- raster::terrain(dem_studyFires, opt=c("slope"))
 writeRaster(DEMslope,"./Inputs/Rasters/DEMslope.tif")
@@ -37,7 +30,7 @@ writeRaster(DEMaspect,"./Inputs/Rasters/DEMaspect.tif")
 
 #Topographic position index
 DEMtpi <- tpi(dem_studyFires, win="circle", scale=100) #not sure what the scale is
-writeRaster(DEMtpi,"DEMtpi.tif")
+writeRaster(DEMtpi,"./Inputs/Rasters/DEMtpi.tif")
 
 #heat load index (based on McCune and Keon 2002)
 DEMhli <- hli(dem_studyFires)
