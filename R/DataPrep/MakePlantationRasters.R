@@ -6,7 +6,6 @@ library(fasterize)
 library(sf)
 library(stringr)
 library(readr)
-st_erase = function(x, y) st_difference(x, st_union(st_combine(y)))
 SpatialFilesPath <- "E:/"
 study_fireTable <- fread("./Inputs/StudyFireList.csv")
 dNBR_imageryDates <- fread("./Inputs/dNBR_dates.csv")
@@ -32,75 +31,9 @@ Results_sel <- Results_All %>%
                 BRUSHING_2 ,SPACING_TR, SPACING_CO ,SPACING__1, FERTILIZAT,FERTILIZ_1, FERTILIZ_2, PRUNING_TR,
                 PRUNING_CO ,PRUNING__1,SLOPE,ASPECT)
 
-
-#### VRI:
-VRI_study <- read_sf(paste0(SpatialFilesPath,"/Spatial Data/VRI/2016/BVRCfire_VRI2016.shp"))
-VRI_study_sel <- VRI_study %>%
-  dplyr::select(FEATURE_ID,  MAP_ID, POLYGON_ID, OPENING_IN, OPENING_SO, OPENING_NU, OPENING_ID, BASAL_AREA, 
-                CROWN_CLOS, CROWN_CL_1,FREE_TO_GR,HARVEST_DA,PROJ_AGE_1,PROJ_AGE_C,PROJ_AGE_2,PROJ_AGE_3,
-                PROJ_HEIGH, PROJ_HEI_1, PROJ_HEI_2, PROJ_HEI_3,
-                SPECIES_CD, SPECIES_PC, SPECIES__1, SPECIES__2, SPECIES__3, SPECIES__4, SPECIES__5,
-                SPECIES__6, SPECIES__7,SPECIES__8, SPECIES__9,SPECIES_10)
-setnames(VRI_study_sel,"OPENING_ID","OPEN_ID_VRI")
-VRI_study_selDT <- as.data.table(VRI_study_sel)
-
-#crown closure classes: 0 0 - 5 % crown closure: 1 6 - 15 % crown closure, 2 16 - 25 % crown closure,
-#3 26 - 35 % crown closure, 4 36 - 45 % crown closure, 5 46 - 55 % crown closure, 6 56 - 65 % crown closure
-#7 66 - 75 % crown closure, 8 76 - 85 % crown closure, 9 86 - 95 % crown closure,10 96 - 100 % crown closure
-VRI_meltSp <- melt(VRI_study_selDT, id.vars = c("FEATURE_ID"),
-                      measure.vars = c("SPECIES_CD","SPECIES__1","SPECIES__3","SPECIES__5","SPECIES__7","SPECIES__9"),
-                      variable.name = "Species_Rank1",
-                      value.name = "Species")
-VRI_meltCov <- melt(VRI_study_selDT, id.vars = c("FEATURE_ID"),
-                       measure.vars = c("SPECIES_PC","SPECIES__2","SPECIES__4", "SPECIES__6","SPECIES__8","SPECIES_10"),
-                       variable.name = "Species_Rank2",
-                       value.name = "PerCover")
-VRIsp_cov <- VRI_meltSp[,.(FEATURE_ID, Species_Rank1, Species,
-                           Species_Rank2 =VRI_meltCov[,Species_Rank2], PerCover=VRI_meltCov[,PerCover])]
-
-VRI_conif <- VRIsp_cov[Species=="BL"|Species=="SX"|Species=="PL"|Species=="B"|Species=="BA"|Species=="FD"|Species=="SB"|
-                         Species=="S"|Species=="HW"|Species=="PLC"|Species=="PLI"|Species=="SE"|Species=="FDI"|
-                         Species=="PA"|Species=="SW"|Species=="PY"|Species=="JR"|Species=="L"|Species=="SS"|
-                         Species=="HM"|Species=="H"|Species=="CW"|Species=="BB"|Species=="LW"|Species=="BM"|
-                         Species=="SXW"|Species=="YC"|Species=="LT"|Species=="FDC"|Species=="PW",
-                       .(conifCov=sum(PerCover)), 
-                       by= "FEATURE_ID"]
-VRI_Decid <- VRIsp_cov[Species=="AC"|Species=="AT"|Species=="EP"|Species=="E"|Species=="ACT",
-                       .(decidCov=sum(PerCover)), 
-                       by= "FEATURE_ID"]
-VRI_Pine <- VRIsp_cov[Species=="PL"|Species=="PLC"|Species=="PLI"|Species=="PA"|Species=="PY"|Species=="PW",
-                       .(PineCov=sum(PerCover)), 
-                       by= "FEATURE_ID"]
-VRI_Fir <- VRIsp_cov[Species=="BL"|Species=="B"|Species=="BB"|Species=="BM",
-                      .(FirCov=sum(PerCover)), 
-                      by= "FEATURE_ID"]
-VRI_Spruce <- VRIsp_cov[Species=="S"|Species=="SW"|Species=="PLI"|Species=="SE"|Species=="SX"|Species=="SB"|
-                          Species=="SS"|Species=="SXW",
-                      .(SpruceCov=sum(PerCover)), 
-                      by= "FEATURE_ID"]
-VRI_DFir <- VRIsp_cov[Species=="FD"|Species=="FDI"|Species=="FDC",
-                     .(DFirCov=sum(PerCover)), 
-                     by= "FEATURE_ID"]
-
-VRI_ConDec <- merge(VRI_conif,VRI_Decid, by=c("FEATURE_ID"), all=TRUE)
-VRI_ConDecP <- merge(VRI_ConDec,VRI_Pine, by=c("FEATURE_ID"), all=TRUE)
-VRI_ConDecPF <- merge(VRI_ConDecP,VRI_Fir, by=c("FEATURE_ID"), all=TRUE)
-VRI_ConDecPFS <- merge(VRI_ConDecPF,VRI_Spruce, by=c("FEATURE_ID"), all=TRUE)
-VRI_sum <- merge(VRI_ConDecPFS,VRI_DFir, by=c("FEATURE_ID"), all=TRUE)
-
-#this will populate the full VRI dataset, but there are features with n/a for most of the classes
-VRI_sum_all <- merge(VRI_study_selDT[,.(FEATURE_ID)],VRI_sum,by="FEATURE_ID",all.x=TRUE)
-#convert n/a to 0 for conifer/deciduous cover?
-for (i in seq_along(VRI_sum_all)) set(VRI_sum_all, i=which(is.na(VRI_sum_all[[i]])), j=i, value=0)
-
-#rm(severity)
 rm(Results_All)
-rm(VRI_study)
 gc()
 
-#Fires in the study:
-r_t_dat_p_Notself <- list()
-FireSevSum_PlantList <- list()
 #split out by fire to reduce data in memory
 for(i in 1:length(study_fireTable$FireID)){
   Fire <- st_as_sf(StudyFirePerims %>% dplyr::filter(FIRE_NUMBE == study_fireTable[i,FireID]))
@@ -338,170 +271,40 @@ for(i in 1:length(study_fireTable$FireID)){
                                         PileBurn, Soil, SpotBurn,WBurn,Spaced,Brushed, SitePrepped,
                                         Fertil,Prune,Planted,geometry)])
     
-    plot(fasterize(Plant_SP_sf %>% dplyr::select("OPENING_ID"),FireRast))
-    plot(fasterize(Plant_SP_sf %>% dplyr::select("PlantAge"),FireRast))
-    plot(fasterize(Plant_SP_sf %>% dplyr::select("BroadBurn"),FireRast))
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="OPENING_ID"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_OpenID.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="PlantAge"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_PlantAge.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="BroadBurn"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_BroadBurn.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="DebrisMade"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_DebrisMade.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="DebrisPiled"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_DebrisPiled.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="MechUnk"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_MechUnk.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="None"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_None.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="PileBurn"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_PileBurn.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="Soil"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_Soil.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="SpotBurn"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_SpotBurn.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="WBurn"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_WBurn.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="Spaced"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_Spaced.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="Brushed"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_Brushed.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="SitePrepped"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_SitePrepped.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="Fertil"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_Fertil.tif"),overwrite=TRUE)
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field="Prune"), 
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_Prune.tif"),overwrite=TRUE)
     
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    # Identify the runs - across the whole fire
-    #### number of pixels that burned
-    
-    #at what severity
-    
-    #early progression vs late progression
-    
-    
-    
-    
-    
-    
-    ###############################################
-    ##### PREVIOUS FOREST COVER PLANTATIONS ######
-    Fire_VRI <- VRI_study_sel %>%
-      dplyr::select(FEATURE_ID,POLYGON_ID,BASAL_AREA, CROWN_CLOS, CROWN_CL_1, FREE_TO_GR,
-                    HARVEST_DA,PROJ_AGE_1, PROJ_AGE_C, PROJ_AGE_2,PROJ_AGE_3,
-                    PROJ_HEIGH, PROJ_HEI_1, PROJ_HEI_2, PROJ_HEI_3) %>%
-      filter(st_intersects(Fire,., sparse = FALSE))
-    Fire_sev_res_vri <- st_intersection(st_buffer(Plantations_sf,0),st_buffer(Fire_VRI,0))
-    Fire_sev_res_vriDT <- as.data.table(Fire_sev_res_vri) #fire, results, severity, vri combination
-    g <- merge(Fire_sev_res_vriDT,VRI_sum_all[,.(FEATURE_ID,decidCov,conifCov,
-                                                 PineCov, FirCov, SpruceCov, DFirCov)],by="FEATURE_ID")
-    VRI_Avg <- g[,.(DecVRICov=mean(na.omit(decidCov)),ConVRICov=mean(na.omit(conifCov)),
-                    PineVRICov=mean(na.omit(PineCov)),FirVRICov=mean(na.omit(FirCov)),
-                    SpruVRICov=mean(na.omit(SpruceCov)), DFirVRICov=mean(na.omit(DFirCov)),
-                    CanopCloVRI = mean(na.omit(CROWN_CLOS)), AgeVRI =mean(na.omit(PROJ_AGE_1)),
-                    HeightVRI = mean(na.omit(PROJ_HEIGH)),BA_VRI = mean(na.omit(BASAL_AREA))),by="OPENING_ID"]
-    Plantations_sf <- merge(Plantations_sf,VRI_Avg, by="OPENING_ID")
-    
-    ###############################
-    ###### SUMMARIZING TREATMENTS (0,1) ########
-    Plantations[,Spaced := ifelse(SPACING__1==0,0,1)]
-    Plantations[,Brushed := ifelse(BRUSHING_1==0,0,1)]
-    Plantations[,SitePrepped := ifelse(SITE_PRE_5==0,0,1)]
-    Plantations[,Fertil := ifelse(FERTILIZ_2==0,0,1)]
-    Plantations[,Prune := ifelse(PRUNING__1==0,0,1)]
-    Plantations[,Planted := ifelse(PLANTING_C==0,0,1)]
-    
-    ##Define harvest treatment
-    #if at least one of the denudations is a clearcut, or it doesn't specify, it counts as a clearcut
-    Plantations[,NumDenuda := DENUDAT_10]
-    Plantations[,HarvType:= ifelse(is.na(DENUDATI_1) & is.na(DENUDATI_1),"CC",
-                                   ifelse(DENUDATI_1=="CLEAR"|DENUDATI_1=="CCRES"|
-                                            DENUDATI_6=="CLEAR"|DENUDATI_6=="CCRES", "CC","PC"))]
-    Plantations[is.na(HarvType)]$HarvType <- "PC" #i can't figure out why the else above isn't working
-    
-    ##### Clean up the plantations dataset and drop columns no longer needed
-   # Plantations <- Plantations[,.(OPENING_ID,PlantAge, Reburn, High, Low,Medium,Unburned,
-    #                              DecVRICov, ConVRICov, PineVRICov, FirVRICov, SpruVRICov, DFirVRICov,
-     #                             CanopCloVRI, AgeVRI, HeightVRI, BA_VRI, Mn_dNBR, Spaced, Brushed,
-      #                            SitePrepped, Fertil, Prune, Planted, NumDenuda, HarvType, geometry)]
-    Plantations <- Plantations[,.(OPENING_ID,PlantAge, Reburn, Spaced, Brushed,
-                                  SitePrepped, Fertil, Prune, Planted, NumDenuda, HarvType, geometry)]
-    Plantations_sf <- st_as_sf(Plantations)
-    
-    #############################  
-    ############# dNBR ##########
-    dNBR <- raster(paste0("./Inputs/Rasters/dNBR_",study_fireTable[i,FireID],".tif"))
-    dNBR_plant <- raster::extract(dNBR, Plantations_sf, fun=median, na.rm=TRUE)
-    Plantations_sf$Mn_dNBR <- dNBR_plant
-    Plantations_sf <- st_cast(Plantations_sf, to="MULTIPOLYGON")
-    Plantations <- as.data.table(Plantations_sf)
-    Plantations[,dNBR_sc:= Mn_dNBR*1000]
-    
-    
-    #############################      
-    ##### PREVIOUS FIRES ######
-    #Clip previous fires by current fire boundary
-    Fire_Pfire <- fire_perimeters %>% 
-      dplyr::filter(st_contains(Fire, ., sparse = FALSE)) %>% 
-      dplyr::filter(FIRE_NUMBE != study_fireTable[i,FireID]) 
-    Fire_Pfire_res <-  dplyr::filter(st_intersection(st_buffer(Plantations_sf,0),
-                                                     st_buffer(Fire_Pfire,0),sparse=FALSE))
-    Fire_Pfire_res$area <- st_area(Fire_Pfire_res) #area of the previous fire
-    Plantations_sf$TotArea <- st_area(Plantations_sf) #area of the total results opening
-    t_dat <- as.data.table(Fire_Pfire_res)[,.(OPENING_ID,FIRE_YEAR,FIRE_CAUSE, PFireArea=unclass(area))] 
-    r_dat <- as.data.table(Plantations_sf)
-    r_t_dat <- merge(r_dat[,.(OPENING_ID, TotArea=unclass(TotArea))],t_dat, by.x="OPENING_ID",by.y="OPENING_ID")
-    r_t_dat_p <- r_t_dat[, .(FIRE_YEAR,FIRE_CAUSE, PropPfire= PFireArea/TotArea), by="OPENING_ID"]
-    if(nrow(r_t_dat_p)>0){
-      r_t_dat_q <- dcast(r_t_dat_p,OPENING_ID~FIRE_YEAR,value.var="PropPfire",fun =mean)
-      Plantations_sf <- merge(Plantations_sf,r_t_dat_q,by="OPENING_ID", all.x=TRUE)
-    } else {
-      Plantations_sf <- Plantations_sf
-    }
-    Plantations <- as.data.table(Plantations_sf)
-    
-    #############################  
-    ##### DAY OF BURN #####
-    DOB <- raster(paste0("./Inputs/Rasters/DOB/",study_fireTable[i,FireID],"/dob.tif"))
-    #DOB_proj <- projectRaster(from=DOB,crs=crs(Plantations_sf)) #what if we don't scale to 30m resolution
-    DOB_plant <- raster::extract(DOB, Plantations_sf, fun=median, na.rm=TRUE)
-    Plantations_sf$Md_DOB <- DOB_plant
-    
-    #############################  
-    ##### TOPOGRAPHY #####
-    DEMslope_ex <- raster::extract(DEMslope, Plantations_sf, fun=mean, na.rm=TRUE)
-    Plantations_sf$DEM_Slop <- DEMslope_ex
-    DEMaspect_ex <- raster::extract(DEMaspect, Plantations_sf, fun=mean, na.rm=TRUE)
-    Plantations_sf$DEM_Asp <- DEMaspect_ex
-    DEMtpi_ex <- raster::extract(DEMtpi, Plantations_sf, fun=mean, na.rm=TRUE)
-    Plantations_sf$DEM_tpi <- DEMtpi_ex
-    DEMhli_ex <- raster::extract(DEMhli, Plantations_sf, fun=mean, na.rm=TRUE)
-    Plantations_sf$DEM_hli <- DEMhli_ex
-    Plantations_sf <- st_cast(Plantations_sf, to="MULTIPOLYGON")
-    Plantations <- as.data.table(Plantations_sf)
-    
-    #############################  
-    write_sf(Plantations_sf, paste0("./Outputs/IndividualFires/",study_fireTable$FireID[i],"_Fire.shp"))
-    Plantations[,geometry:=NULL]
-    write.csv(Plantations,paste0("./Outputs/IndividualFires/",study_fireTable$FireID[i],"_Firedat.csv"),row.names = FALSE)
-     }
-  }
- 
-
-##To Do - clean up above to leave what is needed to run for any paper
-#################################
-
-#probably don't need to do this as a function - 
-#current csvs don't have the young openings removed
-
-RemYngPlants <- function(){
-  #read in the plantations 
-  dt <- data.table()
-  Plantations <- data.table()
-  for(j in 2:length(Fire_shortList)){
-    dt <- fread(paste0("./Outputs/IndividualFires/",Fire_shortList[j],"_Firedat.csv"))
-    dt[, ':='(FireID = Fire_shortList[j])]
-    dt[,.N,by=OPENING_ID]
-    dt[,.N]
-    Plantations <- rbind(Plantations,dt,fill=TRUE)
-  }
-  Plantations <- merge(Plantations,study_fireTable, by="FireID")
-
-  
-  ########## remove plantations that are too young ############
-  preDNBR <- dNBR_imageryDates[PrePost_Fire=="Pre-fire"]
-  postDNBR <- dNBR_imageryDates[PrePost_Fire=="Post-fire"]
-  preDNBR[, PreDate:=as.Date(ImageDate2,format="%d/%m/%Y")]
-  postDNBR[, PostDate:=as.Date(ImageDate2,format="%d/%m/%Y")]
-  FireMinDate <- preDNBR[,.(OldestDNBR = min(PreDate)),by="FireNumber"] #what is the oldest date for pre-fire imagery for a fire
-  range(format(FireMinDate[,OldestDNBR],"%m")) #when was preimagery taken
-  range(format(postDNBR[,PostDate],"%m")) #when was postimagery taken
-  FireStartdNBR <- merge(study_fireTable[FireID %in% Fire_shortList,.(FireID,FireName,StartDate)],
-                         FireMinDate, by.x="FireID", by.y="FireNumber")
-  FireStartdNBR[,MinPlantAge := as.numeric(format(as.Date(StartDate,format="%d/%m/%Y"),"%Y"))-
-                  as.numeric(format(OldestDNBR,"%Y"))]
-  Plantations <- Plantations[PlantAge>=max(FireStartdNBR[,MinPlantAge])] #using 3 myear minimum for now
-  ##############################################################
+  } 
 }
-
 
 

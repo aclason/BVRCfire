@@ -449,8 +449,6 @@ for (xx in 1:length(fire.list)) {
 
 
 
-
-
 			
 	
 
