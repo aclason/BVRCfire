@@ -3,7 +3,7 @@ library(data.table)
 
 #####Set data paths
 #Fire weather data cleaning:
-DatPath <- "./Inputs/Fireweather at Fire Locations/"
+DatPath <- "./Inputs/Fireweather/"
 
 #####Import data
 #BUI
