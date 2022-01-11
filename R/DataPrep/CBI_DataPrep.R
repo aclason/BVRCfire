@@ -7,15 +7,16 @@
 # Dataflow:
 # 1. Load data
 # 2. convert CBI UTMS to lat long and leave as spatial points dataframe
-# 3. Intersect CBI dNBR, VRI and RESULTS to create one dataset.
+# 3. Create a column for whether or not CBI plots are within study boundary
+# 4. Intersect CBI dNBR, VRI and RESULTS to create one dataset.
 
 # Intersect 2020 CBI (already has dNBR and VRI) with RESULTS.
 # Dataflow:
 
-# 4. convert 2020 CBI UTM to lat long and leave as spatial data frame
-# 5. Intersect 2020 CBI with RESULTS
+# 5. convert 2020 CBI UTM to lat long and leave as spatial data frame
+# 6. Intersect 2020 CBI with RESULTS
 
-# 6. Combine 2020 and 2021 CBI datasets
+# 7. Combine 2020 and 2021 CBI datasets
 
 
 #--------------- Load libraries----------------#
@@ -40,8 +41,6 @@ str(CBI_2021)
 # Load CBI 2020
 CBI_2020 <- fread("./Inputs/CBI/cleaned_2020_CBI_plots_with_dNBR_and_VRI_simplified.csv")
 str(CBI_2020)
-# Rename plot_ID to match 2021
-setnames(CBI_2020, "plot_ID", "Plot_ID")
 
 
 # Load dNBR rasters in raster stack
@@ -60,9 +59,15 @@ dNBR <- stack(dNBR_list)
 dim(dNBR)
 
 
-# Load VRI (2016)
+# Load VRI (2016) for study fire boundary
 VRI_study <- read_sf("E:/Ingrid/Borealis/BVRC_21-01_CFS/VRI/VRI2016_StudyFires/VRI2016_StudyFires.shp")
-VRI_study_sel <- VRI_study %>%
+# Dissolve VRI internal boundaries to get simple fire study polygon
+study_boundary <- st_union(VRI_study)
+
+
+# Load VRI (2016) that extends beyond fire boundary
+VRI <- read_sf("E:/Ingrid/Borealis/BVRC_21-01_CFS/VRI/VRI_2016/VRI_2016_greater_study_area.shp")
+VRI_sel <- VRI %>%
   dplyr::select(FEATURE_ID,  MAP_ID, POLYGON_ID, OPENING_IN, OPENING_SO, OPENING_NU, OPENING_ID, BASAL_AREA, 
                 CROWN_CLOS, CROWN_CL_1,FREE_TO_GR,HARVEST_DA,PROJ_AGE_1,PROJ_AGE_C,PROJ_AGE_2,PROJ_AGE_3,
                 PROJ_HEIGH, PROJ_HEI_1, PROJ_HEI_2, PROJ_HEI_3,
@@ -110,16 +115,30 @@ CBI_2021_utms <- CBI_2021[,.(Plot_ID, UTM_E, UTM_N)]
 longlat.cbi <- merge(longlat.cbi, CBI_2021_utms, by = "Plot_ID")
 str(longlat.cbi) # make sure there are 48 observations i.e UTMS were added
 
-# Make sure VRI and CBI plots intersect
+
+# Check if study boundary and CBI plots intersect
 plot(longlat.cbi, col = "red")
-plot(VRI_study_sel, add = TRUE)
-### THERE ARE 2 PLOTS OUTSIDE OF FIRE BOUNDARIES!! ##### continue on but flag to Phil
+plot(study_boundary, add = TRUE)
+### THERE ARE SOME PLOTS OUTSIDE OF FIRE BOUNDARIES!! ##### create column to note this
 
 
-#-------------------- 3. Intersect 2021 CBI, dNBR, VRI, and RESULTS ---------------#
+
+#-------------------3. Create column for whether CBI plot is within study boundary ------------#
+# Convert spdf to sf 
+plots_sf <- st_as_sf(longlat.cbi)
+# Which plots intersect boundary
+inside_study <- st_intersects(plots_sf, study_boundary, sparse = FALSE)
+# Join with plot data
+plots <- cbind(plots_sf, inside_study)
+# Convert sf to spdf
+plots_spdf<- as_Spatial(plots)
+
+
+
+#-------------------- 4. Intersect 2021 CBI, dNBR, VRI, and RESULTS ---------------#
 # Have to merge one at a time (can't find a way to merge all at the same time)
 # Extract polygon info for each point
-merged_2021CBI_VRI <- point.in.poly(longlat.cbi, VRI_study_sel)
+merged_2021CBI_VRI <- point.in.poly(plots_spdf, VRI_sel)
 merged_2021CBI_VRI_RESULTS <- point.in.poly(merged_2021CBI_VRI, Results_sel)
 
 # Extract raster values by points
@@ -131,10 +150,11 @@ all_merged_2021 <- cbind(merged_2021CBI_VRI_RESULTS, rasValue)
 write.csv(all_merged_2021, file="./Outputs/CBI/2021_CBI_dNBR_VRI_RESULTS.csv")
 
 
-#----------------- 4. Convert UTM in 2020 CBI to lat long ----------------------#
+
+#----------------- 5. Convert UTM in 2020 CBI to lat long ----------------------#
 # Data has 2 UTM zones (9 and 10) so split into two datasets then merge back together?
-utm9.cbi2020 <- CBI_2020[UTM_zone == 9,]
-utm10.cbi2020 <- CBI_2020[UTM_zone == 10,]
+utm9.cbi2020 <- CBI_2020[UTM_Zone == 9,]
+utm10.cbi2020 <- CBI_2020[UTM_Zone == 10,]
 
 # Create spatial object for coordinate conversion
 coordinates(utm9.cbi2020) <- c("UTM_E", "UTM_N") # fyi this removes UTM_E and UTM_N as attributes
@@ -161,10 +181,26 @@ CBI_2020_utms <- unique(CBI_2020_utms, by = "Plot_ID") # there are duplicate plo
 longlat.cbi2020 <- merge(longlat.cbi2020, CBI_2020_utms, by = "Plot_ID")
 str(longlat.cbi2020) # make sure there are 214 observations and 141 variables
 
-#------------------- 5. Intersect 2020 CBI (already has VRI and dNBR) with RESULTS --------------#
+
+
+#------------------- 6. Intersect 2020 CBI (already has VRI and dNBR) with RESULTS --------------#
 all_merged_2020 <- point.in.poly(longlat.cbi2020, Results_sel)
 # Export table to check it out
 write.csv(all_merged_2020, file="./Outputs/CBI/2020_CBI_dNBR_VRI_RESULTS.csv")
 
 
-#---------------- 6. Combine 2021 and 2020 datasets ----------------------#
+
+#---------------- 7. Combine 2021 and 2020 datasets ----------------------#
+# Convert spdf to data tables
+dt_2020 <- as.data.table(all_merged_2020)
+str(dt_2020)
+
+dt_2021 <- as.data.table(all_merged_2021)
+str(dt_2021)
+dt_2021[, Slope_. :=as.character(Slope_.)] 
+
+# Merge tables
+CBI_merged <- full_join(x = dt_2020, y = dt_2021)
+
+# Export
+write.csv(CBI_merged, file = "./Outputs/CBI/2020_2021_CBI_merged.csv")
