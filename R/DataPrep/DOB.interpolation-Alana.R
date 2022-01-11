@@ -46,13 +46,13 @@ library(lubridate)
 # Note this is set up to run on the MTBS fire history shapefile
 
 	#setwd('D:/temp/sample.DOB.code/sample.fire.history.atlas')
-	fire.perims <- st_read("./Inputs/Shapefiles/Study_fire_perimeters.shp")
+	fire.perims <- st_read("./Inputs/Study_fire_perimeters.shp")
 	fire.perims <- st_transform(fire.perims, '+proj=longlat +datum=WGS84 +no_defs')
-	fire.perims <- fire.perims %>% dplyr::filter(FIRE_YEAR==2017)
 
 
 # Year of fires. You will need to modify this file if you have several years to process
-	year <- 2017
+	#year <- fire.perims$Year[1]
+  year <- 2017
 
 # Set the output pixel size here. Canadian folk might want to consider 100 or 200 m.
 
@@ -78,10 +78,10 @@ library(lubridate)
 ## Get MODIS fire detections & Get VIIRS fire detections
 #I know that the data comes from 4 files, so reading them all in. No point in a for loop as they are specific and won't change:
 hotspots.list <- list()
-hotspots.list[[1]] <- st_read("E:/Spatial Data/Fire/DL_FIRE_M-C61_20650/fire_archive_M-C61_20650.shp") 
-hotspots.list[[2]] <- st_read("E:/Spatial Data/Fire/DL_FIRE_M-C61_20654/fire_archive_M-C61_20654.shp") 
-hotspots.list[[3]] <- st_read("E:/Spatial Data/Fire/DL_FIRE_SV-C2_20651/fire_archive_SV-C2_20651.shp") 
-hotspots.list[[4]] <- st_read("E:/Spatial Data/Fire/DL_FIRE_SV-C2_20655/fire_archive_SV-C2_20655.shp")
+hotspots.list[[1]] <- st_read("F:/Spatial Data/hotspots/MODIS/DL_FIRE_M6_176376/fire_archive_M6_176376.shp") 
+hotspots.list[[2]] <- st_read("F:/Spatial Data/hotspots/MODIS/DL_FIRE_M6_176379/fire_archive_M6_176379.shp") 
+hotspots.list[[3]] <- st_read("F:/Spatial Data/hotspots/MODIS/DL_FIRE_V1_176378/fire_archive_V1_176378.shp") 
+hotspots.list[[4]] <- st_read("F:/Spatial Data/hotspots/MODIS/DL_FIRE_V1_176381/fire_archive_V1_176381.shp")
 for(i in 1:4){
   hotspots.list[[i]] <- hotspots.list[[i]][, c('LATITUDE', 'LONGITUDE', 'ACQ_DATE', 'ACQ_TIME', 'SATELLITE', 'INSTRUMENT')]
 }
@@ -167,10 +167,11 @@ for (xx in 1:length(fire.list)) {
 
 		fire.hotspots <- subset(fire.hotspots, select=c('ID', 'ACQ_DATE', 'ACQ_TIME', 'SATELLITE', 'date', 'time', 'loc_JDT'))
 
-		dir.create(paste0("./Inputs/Rasters/DOB/", fire))
+		dir.create(paste0("./Outputs/DOB/", fire))
 
+		#setwd(paste0('D:/temp/sample.dob.code/DOB/', fire))
 		file.name <- paste(fire, '_hotspots.shp', sep='')
-		st_write(fire.hotspots, paste0("./Inputs/Rasters/DOB/", fire,"/",file.name), delete_layer=TRUE)
+		st_write(fire.hotspots, paste0("./Outputs/DOB/", fire,"/",file.name), delete_layer=TRUE)
 		
 	}
 }
@@ -217,11 +218,11 @@ for (xx in 1:length(fire.list)) {
 	fire.perim.raster <- fasterize(fire.shp, blank.raster)
 
 	## Some perimeters may have zero fire detections, so a directory may not have been created in stage 1
-	if (dir.exists(paste0('./Inputs/Rasters/DOB/', fire)) == T) {
+	if (dir.exists(paste0('./Outputs/DOB/', fire)) == T) {
 
 		# Get fire detetection points
 		#setwd(paste0('D:/temp/sample.dob.code/DOB/', fire))
-		fire.hotspots <- st_read(paste0("./Inputs/Rasters/DOB/",fire,"/",fire, '_hotspots.shp'))
+		fire.hotspots <- st_read(paste0("./Outputs/DOB/",fire,"/",fire, '_hotspots.shp'))
 		fire.hotspots <- st_transform(fire.hotspots, crs=the.prj)
 
 		# I am under the impression that one should not interpolate DOB if there are not very many fire detections
@@ -335,7 +336,7 @@ for (xx in 1:length(fire.list)) {
 			xyz$z <- data[, 'DOB.wmd']
 			
 			modeled.dob <- rasterFromXYZ(xyz, res=c(pixel.size, pixel.size), digits=0, crs=the.prj)		
-			writeRaster(modeled.dob, paste0("./Inputs/Rasters/DOB/",fire,"/","dob.tmp.tif"), format="GTiff", options=c("COMPRESS=LZW", "TFW=YES"), datatype='INT2S', overwrite=T)
+			writeRaster(modeled.dob, paste0("./Outputs/DOB/",fire,"/","dob.tmp.tif"), format="GTiff", options=c("COMPRESS=LZW", "TFW=YES"), datatype='INT2S', overwrite=T)
 			
 		}
 	}
@@ -361,14 +362,14 @@ for (xx in 1:length(fire.list)) {
 
 	## This is a check because stage 1 and 2 does not produce files if there are not enough fire detections
 	#if (file.exists(paste0('D:/temp/sample.dob.code/DOB/', fire, '/dob.tmp.tif')) & dir.exists(paste0('D:/temp/sample.dob.code/DOB/', fire)) == T) {
-	if (file.exists(paste0('./Inputs/Rasters/DOB/', fire, '/dob.tmp.tif')) & dir.exists(paste0('./Inputs/Rasters/DOB/', fire)) == T) {
+	if (file.exists(paste0('./Outputs/DOB/', fire, '/dob.tmp.tif')) & dir.exists(paste0('./Outputs/DOB/', fire)) == T) {
 	    
 		#setwd(paste0('D:/temp/sample.dob.code/DOB/', fire))
 
 	
 		# Load up the modeled DOB
 
-		modeled.dob.raster <- raster(paste0('./Inputs/Rasters/DOB/', fire, '/dob.tmp.tif'))	
+		modeled.dob.raster <- raster(paste0('./Outputs/DOB/', fire, '/dob.tmp.tif'))	
 
 
 		# Basically, these next steps create 'regions' for all continuous DOB estimates that are less than 25 ha
@@ -437,7 +438,7 @@ for (xx in 1:length(fire.list)) {
 
 		# This is the final DOB estimate	
 		modeled.dob <- rasterFromXYZ(dob.df, res=c(pixel.size,pixel.size), digits=0, crs=(the.prj))
-		writeRaster(modeled.dob, paste0("./Inputs/Rasters/DOB/",fire,"/dob.tif"), format="GTiff", options=c("COMPRESS=LZW", "TFW=YES"), datatype='INT2U', overwrite=T)
+		writeRaster(modeled.dob, paste0("./Outputs/DOB/",fire,"/dob.tif"), format="GTiff", options=c("COMPRESS=LZW", "TFW=YES"), datatype='INT2U', overwrite=T)
 #		file.remove('dob.tmp.tif'); file.remove('dob.tmp.tfw')
 	}
 
@@ -446,6 +447,8 @@ for (xx in 1:length(fire.list)) {
 ## This error is returned "implicit list embedding of S4 objects is deprecated"
 ## But the procedure completes and works.
 ## If you have a way to avoid this error, I'd appreciate hearing about it.
+
+
 
 
 
