@@ -21,9 +21,8 @@
 
 #--------------- Load libraries----------------#
 ls <- c("tidyverse", "data.table") # Data Management and Manipulation
-ls <- append(ls, c("sp", "GSIF", "stars", "sf")) # geo comp.
-ls <- append(ls, c("rgdal", "sf", "raster", # more geo comp.
-                   "rasterVis", "tmap", "RColorBrewer", "spatialEco"))   
+ls <- append(ls, c("raster", "sf", "spatialEco")) # geo comp.
+ 
 
 # Install if needed -- then load. 
 new.packages <- ls[!(ls %in% installed.packages()[,"Package"])]
@@ -52,6 +51,7 @@ dNBR_list <- list.files("E:/Ingrid/Borealis/BVRC_21-01_CFS/Rasters/dNBR/",
 print(paste("there are", length(dNBR_list), "covariates in the list")) # make sure there are 20
 
 dNBR_list <- dNBR_list[!grepl("xml",dNBR_list)]
+dNBR_list <- dNBR_list[grepl("(R21721|R11796|R11498|C10784|R11921)", dNBR_list)] # select fires of interest
 dNBR_list
 
 # Create raster stack
@@ -108,7 +108,7 @@ longlat10.cbi <- spTransform(utm10.cbi, CRS("+init=epsg:3005"))
 str(longlat10.cbi)
 
 # Now merge datasets and add UTM E and UTM N back on as attributes
-longlat.cbi <- union(longlat9.cbi, longlat10.cbi)
+longlat.cbi <- raster::union(longlat9.cbi, longlat10.cbi)
 str(longlat.cbi) # make sure there are 123 observations
 
 CBI_2021_utms <- CBI_2021[,.(Plot_ID, UTM_E, UTM_N)]
@@ -142,12 +142,64 @@ merged_2021CBI_VRI <- point.in.poly(plots_spdf, VRI_sel)
 merged_2021CBI_VRI_RESULTS <- point.in.poly(merged_2021CBI_VRI, Results_sel)
 
 # Extract raster values by points
-rasValue <- raster::extract(dNBR, merged_2021CBI_VRI_RESULTS)
+rasValue_mean <- raster::extract(dNBR, merged_2021CBI_VRI_RESULTS, buffer = 30, fun = mean)
+rasValue_median <- raster::extract(dNBR, merged_2021CBI_VRI_RESULTS, buffer = 30, fun = median)
+rasValue_min <- raster::extract(dNBR, merged_2021CBI_VRI_RESULTS, buffer = 30, fun = min)
+rasValue_max <- raster::extract(dNBR, merged_2021CBI_VRI_RESULTS, buffer = 30, fun = max)
+
 # Combine raster values with point
-all_merged_2021 <- cbind(merged_2021CBI_VRI_RESULTS, rasValue)
+merged_2021.1 <- cbind(merged_2021CBI_VRI_RESULTS, rasValue_mean) # mean
+merged_2021.2 <- cbind(merged_2021.1, rasValue_median) # median
+merged_2021.3 <- cbind(merged_2021.2, rasValue_min) # min
+merged_2021.4 <- cbind(merged_2021.3, rasValue_max) # max
+
+# Combine all means, median, min, max into single columns & rename
+# Some columns have 2 dNBR's (overlaping rasters) - so drop dNBR that is not the correct fire ID
+merged_2021.4 <- as.data.table(merged_2021.4)
+# Means
+merged_2021.4[Fire_ID != "C10784", dNBR_C10784:=paste0(dNBR_C10784, NA)]
+merged_2021.4[Fire_ID != "R11498", dNBR_R11498:=paste0(dNBR_R11498, NA)]
+merged_2021.4[Fire_ID != "R11796", dNBR_R11796:=paste0(dNBR_R11796, NA)]
+merged_2021.4[Fire_ID != "R11921", dNBR_R11921:=paste0(dNBR_R11921, NA)]
+merged_2021.4[Fire_ID != "R21721", dNBR_R21721:=paste0(dNBR_R21721, NA)]
+
+merged_2021.4 <- merged_2021.4 %>% 
+  unite(dNBR_mean, c("dNBR_C10784", "dNBR_R11498", "dNBR_R11796", "dNBR_R11921", "dNBR_R21721"), na.rm = TRUE)
+
+# Medians
+merged_2021.4[Fire_ID != "C10784", dNBR_C10784.1:=paste0(dNBR_C10784.1, NA)]
+merged_2021.4[Fire_ID != "R11498", dNBR_R11498.1:=paste0(dNBR_R11498.1, NA)]
+merged_2021.4[Fire_ID != "R11796", dNBR_R11796.1:=paste0(dNBR_R11796.1, NA)]
+merged_2021.4[Fire_ID != "R11921", dNBR_R11921.1:=paste0(dNBR_R11921.1, NA)]
+merged_2021.4[Fire_ID != "R21721", dNBR_R21721.1:=paste0(dNBR_R21721.1, NA)]
+
+merged_2021.4 <- merged_2021.4 %>% 
+  unite(dNBR_median, c("dNBR_C10784.1", "dNBR_R11498.1", "dNBR_R11796.1", "dNBR_R11921.1", "dNBR_R21721.1"), na.rm = TRUE)
+
+# Mins
+merged_2021.4[Fire_ID != "C10784", dNBR_C10784.2:=paste0(dNBR_C10784.2, NA)]
+merged_2021.4[Fire_ID != "R11498", dNBR_R11498.2:=paste0(dNBR_R11498.2, NA)]
+merged_2021.4[Fire_ID != "R11796", dNBR_R11796.2:=paste0(dNBR_R11796.2, NA)]
+merged_2021.4[Fire_ID != "R11921", dNBR_R11921.2:=paste0(dNBR_R11921.2, NA)]
+merged_2021.4[Fire_ID != "R21721", dNBR_R21721.2:=paste0(dNBR_R21721.2, NA)]
+
+merged_2021.4 <- merged_2021.4 %>% 
+  unite(dNBR_min, c("dNBR_C10784.2", "dNBR_R11498.2", "dNBR_R11796.2", "dNBR_R11921.2", "dNBR_R21721.2"), na.rm = TRUE)
+
+
+# Maxs
+merged_2021.4[Fire_ID != "C10784", dNBR_C10784.3:=paste0(dNBR_C10784.3, NA)]
+merged_2021.4[Fire_ID != "R11498", dNBR_R11498.3:=paste0(dNBR_R11498.3, NA)]
+merged_2021.4[Fire_ID != "R11796", dNBR_R11796.3:=paste0(dNBR_R11796.3, NA)]
+merged_2021.4[Fire_ID != "R11921", dNBR_R11921.3:=paste0(dNBR_R11921.3, NA)]
+merged_2021.4[Fire_ID != "R21721", dNBR_R21721.3:=paste0(dNBR_R21721.3, NA)]
+
+merged_2021.4 <- merged_2021.4 %>% 
+  unite(dNBR_max, c("dNBR_C10784.3", "dNBR_R11498.3", "dNBR_R11796.3", "dNBR_R11921.3", "dNBR_R21721.3"), na.rm = TRUE)
+
 
 # Export table to check it out
-write.csv(all_merged_2021, file="./Outputs/CBI/2021_CBI_dNBR_VRI_RESULTS.csv")
+write.csv(merged_2021.4, file="./Outputs/CBI/2021_CBI_dNBR_VRI_RESULTS.csv")
 
 
 
@@ -173,7 +225,7 @@ longlat10.cbi2020 <- spTransform(utm10.cbi2020, CRS("+init=epsg:3005"))
 str(longlat10.cbi2020)
 
 # Now merge datasets and add UTM E and UTM N back on as attributes
-longlat.cbi2020 <- union(longlat9.cbi2020, longlat10.cbi2020)
+longlat.cbi2020 <- raster::union(longlat9.cbi2020, longlat10.cbi2020)
 str(longlat.cbi2020) # make sure there are 214 observations
 
 CBI_2020_utms <- CBI_2020[,.(Plot_ID, UTM_E, UTM_N)]
@@ -194,10 +246,14 @@ write.csv(all_merged_2020, file="./Outputs/CBI/2020_CBI_dNBR_VRI_RESULTS.csv")
 # Convert spdf to data tables
 dt_2020 <- as.data.table(all_merged_2020)
 str(dt_2020)
+dt_2020[, dNBR_mean := as.character(dNBR_mean)]
+dt_2020[, dNBR_median := as.character(dNBR_median)]
+dt_2020[, dNBR_min := as.character(dNBR_min)]
+dt_2020[, dNBR_max := as.character(dNBR_max)]
 
-dt_2021 <- as.data.table(all_merged_2021)
+dt_2021 <- as.data.table(merged_2021.4)
 str(dt_2021)
-dt_2021[, Slope_. :=as.character(Slope_.)] 
+dt_2021[, Slope_. :=as.character(Slope_.)] # Slope_. is a character in 2020 data
 
 # Merge tables
 CBI_merged <- full_join(x = dt_2020, y = dt_2021)
