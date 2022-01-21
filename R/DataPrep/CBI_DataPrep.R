@@ -10,11 +10,11 @@
 # 3. Create a column for whether or not CBI plots are within study boundary
 # 4. Intersect CBI dNBR, VRI and RESULTS to create one dataset.
 
-# Intersect 2020 CBI (already has dNBR and VRI) with RESULTS.
+# Intersect 2020 CBI (already has dNBR and VRI, but going to merge with VRI I used for 2021 data) with RESULTS
 # Dataflow:
 
 # 5. convert 2020 CBI UTM to lat long and leave as spatial data frame
-# 6. Intersect 2020 CBI with RESULTS
+# 6. Intersect 2020 CBI with RESULTS and VRI
 
 # 7. Combine 2020 and 2021 CBI datasets
 
@@ -32,6 +32,8 @@ rm(ls, new.packages)
 
 
 #--------------- 1. Load data -----------------------#
+SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
+
 # Load CBI 2021
 CBI_2021 <- fread("./Inputs/CBI/2021_CBI_plots_5_fires_cleaned_17Dec2021_CondensedData.csv")
 str(CBI_2021)
@@ -43,7 +45,7 @@ str(CBI_2020)
 
 
 # Load dNBR rasters in raster stack
-dNBR_list <- list.files("E:/Ingrid/Borealis/BVRC_21-01_CFS/Rasters/dNBR/",
+dNBR_list <- list.files(paste0(SpatialFilesPath, "./Inputs/dNBR"),
                         pattern = "*.tif", 
                         recursive = FALSE, 
                         full.names=TRUE)
@@ -95,17 +97,13 @@ utm10.cbi <- CBI_2021[UTM_Zone == 10,]
 coordinates(utm9.cbi) <- c("UTM_E", "UTM_N") # fyi this removes UTM_E and UTM_N as attributes
 coordinates(utm10.cbi) <- c("UTM_E", "UTM_N")
 
-proj4string(utm9.cbi) # at this point dataset doesn't have a CRS
-
 proj4string(utm9.cbi) <- CRS("+init=epsg:26909") # for UTM zone 9
 proj4string(utm10.cbi) <- CRS("+init=epsg:26910") # for UTM zone 10
 
 
 # Now datasets have coordinates and CRS, next convert to Longitude and Latitude
 longlat9.cbi <- spTransform(utm9.cbi, CRS("+init=epsg:3005"))
-str(longlat9.cbi)
 longlat10.cbi <- spTransform(utm10.cbi, CRS("+init=epsg:3005"))
-str(longlat10.cbi)
 
 # Now merge datasets and add UTM E and UTM N back on as attributes
 longlat.cbi <- raster::union(longlat9.cbi, longlat10.cbi)
@@ -186,7 +184,6 @@ merged_2021.4[Fire_ID != "R21721", dNBR_R21721.2:=paste0(dNBR_R21721.2, NA)]
 merged_2021.4 <- merged_2021.4 %>% 
   unite(dNBR_min, c("dNBR_C10784.2", "dNBR_R11498.2", "dNBR_R11796.2", "dNBR_R11921.2", "dNBR_R21721.2"), na.rm = TRUE)
 
-
 # Maxs
 merged_2021.4[Fire_ID != "C10784", dNBR_C10784.3:=paste0(dNBR_C10784.3, NA)]
 merged_2021.4[Fire_ID != "R11498", dNBR_R11498.3:=paste0(dNBR_R11498.3, NA)]
@@ -212,17 +209,13 @@ utm10.cbi2020 <- CBI_2020[UTM_Zone == 10,]
 coordinates(utm9.cbi2020) <- c("UTM_E", "UTM_N") # fyi this removes UTM_E and UTM_N as attributes
 coordinates(utm10.cbi2020) <- c("UTM_E", "UTM_N")
 
-proj4string(utm9.cbi2020) # at this point dataset doesn't have a CRS
-
 proj4string(utm9.cbi2020) <- CRS("+init=epsg:26909") # for UTM zone 9
 proj4string(utm10.cbi2020) <- CRS("+init=epsg:26910") # for UTM zone 10
 
 
 # Now datasets have coordinates and CRS, next convert to Longitude and Latitude
 longlat9.cbi2020 <- spTransform(utm9.cbi2020, CRS("+init=epsg:3005"))
-str(longlat9.cbi2020)
 longlat10.cbi2020 <- spTransform(utm10.cbi2020, CRS("+init=epsg:3005"))
-str(longlat10.cbi2020)
 
 # Now merge datasets and add UTM E and UTM N back on as attributes
 longlat.cbi2020 <- raster::union(longlat9.cbi2020, longlat10.cbi2020)
@@ -236,15 +229,18 @@ str(longlat.cbi2020) # make sure there are 214 observations and 141 variables
 
 
 #------------------- 6. Intersect 2020 CBI (already has VRI and dNBR) with RESULTS --------------#
-all_merged_2020 <- point.in.poly(longlat.cbi2020, Results_sel)
+merged_2020CBI_VRI <- point.in.poly(longlat.cbi2020, VRI_sel)
+merged_2020CBI_VRI_RESULTS <- point.in.poly(merged_2020CBI_VRI, Results_sel)
+
 # Export table to check it out
-write.csv(all_merged_2020, file="./Outputs/CBI/2020_CBI_dNBR_VRI_RESULTS.csv")
+as.data.frame(merged_2020CBI_VRI_RESULTS)
+write.csv(merged_2020CBI_VRI_RESULTS, file="./Outputs/CBI/2020_CBI_dNBR_VRI_RESULTS.csv")
 
 
 
 #---------------- 7. Combine 2021 and 2020 datasets ----------------------#
 # Convert spdf to data tables
-dt_2020 <- as.data.table(all_merged_2020)
+dt_2020 <- as.data.table(merged_2020CBI_VRI_RESULTS)
 str(dt_2020)
 dt_2020[, dNBR_mean := as.character(dNBR_mean)]
 dt_2020[, dNBR_median := as.character(dNBR_median)]
