@@ -1,0 +1,21 @@
+FireID,FireName,StartDate,OfficialEndDate,AnalysisEndDate,Total_Area,Burned_Percent,weather_stn1,weather_stn2,weather_stn3,weather_stn4
+K20637,Elephant Hill,06/07/2017,05/09/2018,31/10/2017,"192,646",83.2,,,,
+C20735,White Lake,07/07/2017,11/06/2018,31/10/2017,"13,212",79.9,,,,
+C50647,Hanceville-Riske Creek,07/07/2017,18/06/2018,31/10/2017,"239,338",84.7,,,,
+C50744,Kleena Kleene,07/07/2017,18/06/2018,31/10/2017,"25,555",78.1,,,,
+C20729,Wildwood,07/07/2017,19/06/2018,31/10/2017,"12,723",80.8,,,,
+C10784,Plateau Complex,07/07/2017,05/07/2018,31/10/2017,"521,007",88.6,,,,
+C10970,Kluskoil Lake,10/07/2017,18/06/2018,31/10/2017,"21,870",74.8,,,,
+R11796,Verdun Mountain,12/07/2018,07/12/2018,31/10/2018,"50,230",85.5,,,,
+R11498,Shovel Lake,27/07/2018,07/12/2018,31/10/2018,"92,377",89.8,,,,
+G41607,Chutanli Lake,30/07/2018,07/01/2019,31/10/2018,"20,734",78.6,Kluskus,Moose Lake,,
+G51632,Tezzeron Lake,30/07/2018,07/01/2019,31/10/2018,"10,592",79.4,Fort St. James,North Chilco,,
+R21721,Nadina Lake,31/07/2018,07/12/2018,31/10/2018,"88,063",85,,,,
+R12068,Pondosy Bay,01/08/2018,19/11/2018,31/10/2018,"53,259",88.8,Moose Lake,East Ootsa,Nadina,***these are all very far away
+R12315,Tesla Lake,01/08/2018,18/11/2018,31/10/2018,"86,958",85.5,Moose Lake,East Ootsa,Nadina,***these are all very far away
+C11837,Shag Creek,01/08/2018,01/01/2000,31/10/2018,"12,309",80.4,Baldface,Moose Lake,Nazko,
+C11937,North Baezaeko,01/08/2018,01/01/2000,31/10/2018,"13,422",80.1,Nazko,Tautri,,
+C12594,Baldface Mountain,01/08/2018,01/01/2000,31/10/2018,"10,529",89.8,Baldface,Anahim Lake,,
+VA1964,Dean River,01/08/2018,01/01/2019,31/10/2018,"44,789",83.8,Hagensborg2,,,***these are all very far away
+VA1787,Ramsey Creek,01/08/2018,25/01/2019,31/10/2018,"79,355",85.2,Jerry,Hixon,Bowron Haggen,
+R11921,Island Lake,01/08/2018,07/12/2018,31/10/2018,"21,357",84.2,,,,
