@@ -1,0 +1,696 @@
+---
+title: "PlantationSkils_DataPrep"
+author: "A. Clason"
+date: "March 31, 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#Load libraries
+```{r eval=TRUE,echo=FALSE}
+library(data.table)
+library(dplyr)
+library(raster)
+library(sf)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(ggpubr)
+
+#Study fires
+study_fireTable <- fread("./Inputs/StudyFireList.csv")
+Fire_shortList <- c("K20637","C20735","C50647","C50744","C20729","C10784","C10970", "R11796",
+                    "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
+ResultsPolyOverlap <- fread("./Outputs/IndividualFires/ResultsPolyOverlap.csv")
+dNBR_imageryDates <- fread("./Inputs/dNBR_dates.csv")
+SitePrepGroups <- fread("./Inputs/SitePrep_TypeMethods.csv")
+fw <- fread("./Inputs/Fireweather at Fire Locations/FireWeather.csv")
+
+```
+
+##Spatial Files - only run if running MakeFireDataTable.R
+
+Most of these files need to be loaded here. There are a few (DOB and dNBR) that are loaded fire by fire in the MakeFireDataTable.R script 
+
+If you try and load in the spatial files that were saved from MakeFireDataTable.R, they might not be perfect, due to issues with write_sf function
+```{r}
+#source(MakeFireDataTable.R) 
+#if you need to actually run the fire table script to generate data tables. Could do it as a function instead where you pass a fireID and create a datatable from that
+
+##### Fire perimeters #####
+fire_perimeters <- read_sf("E:/Spatial Data/Fire/Historical wildfire perimeters/BC Wildfire Historical Fire Perimeters.shp",quiet=TRUE)
+fire_per_sel <- fire_perimeters %>%
+  dplyr::select(FIRE_NUMBE,FIRE_YEAR,FIRE_CAUSE)
+
+Study_fire_perimeters <- as.data.table(fire_per_sel)[FIRE_NUMBE %in% c(study_fireTable[,FireID])]
+
+##### Severity mapping (all 2015-2018) #####
+severity <- read_sf("F:/Spatial Data/FCI_Fire_Regen_spatialfiles/Burn severity 2015_2018/BurnSeverityRating_2018.shp", quiet=T)
+severity_sel <- severity %>%
+  dplyr::select(FIRE_NUMBE,FIRE_YEAR,BURN_SEVER)
+
+##### dNBR #####
+dNBR_list <- list()
+dNBR_list[[1]] <- raster("E:/Fires_dNBR/dNBR_imagery/C10784_Plateau_Complex_dNBR.tif")
+dNBR_list[[2]] <- raster("E:/Fires_dNBR/dNBR_imagery/C10970_Kluskoil_Lake_dNBR.tif")
+dNBR_list[[3]] <- raster("E:/Fires_dNBR/dNBR_imagery/C11837_Shag_Creek_dNBR.tif")
+dNBR_list[[4]] <- raster("E:/Fires_dNBR/dNBR_imagery/C11937_North_Baezaeko_dNBR.tif")
+dNBR_list[[5]] <- raster("E:/Fires_dNBR/dNBR_imagery/C20279_Wildwood_dNBR.tif")
+dNBR_list[[6]] <- raster("E:/Fires_dNBR/dNBR_imagery/C50647_Hanceville_Riske_Creek_dNBR.tif")
+dNBR_list[[7]] <- raster("E:/Fires_dNBR/dNBR_imagery/C50744_Kleena_Kleene_dNBR.tif")
+dNBR_list[[8]] <- raster("E:/Fires_dNBR/dNBR_imagery/G04226_Lejac_dNBR.tif")
+dNBR_list[[9]] <- raster("E:/Fires_dNBR/dNBR_imagery/G10037_BobtailLk_dNBR.tif")
+dNBR_list[[10]] <- raster("E:/Fires_dNBR/dNBR_imagery/G41607_Chutanli_dNBR.tif")
+dNBR_list[[11]] <- raster("E:/Fires_dNBR/dNBR_imagery/G51632_Tezzeron_dNBR.tif")
+dNBR_list[[12]] <- raster("E:/Fires_dNBR/dNBR_imagery/K20637_Elephant_Hill_dNBR.tif")
+dNBR_list[[13]] <- raster("E:/Fires_dNBR/dNBR_imagery/dNBR_imagery/R11498_Shovel_Lake_dNBRS2.tif")
+dNBR_list[[14]] <- raster("E:/Fires_dNBR/dNBR_imagery/R11796_Verdun_dNBR.tif")
+dNBR_list[[15]] <- raster("E:/Fires_dNBR/dNBR_imagery/R11921_Island_Lake_dNBR.tif")
+dNBR_list[[16]] <- raster("E:/Fires_dNBR/dNBR_imagery/R12068_PondosyBay_dNBR.tif")
+dNBR_list[[17]] <- raster("E:/Fires_dNBR/dNBR_imagery/R12594_Baldface_Mtn_dNBR.tif")
+dNBR_list[[18]] <- raster("E:/Fires_dNBR/dNBR_imagery/R21721_Nadina_dNBR.tif")
+dNBR_list[[19]] <- raster("E:/Fires_dNBR/dNBR_imagery/R91947_AlkaliLk_dNBR.tif")
+dNBR_list[[20]] <- raster("E:/Fires_dNBR/dNBR_imagery/VA1787_RamseyCrk_dNBR.tif")
+dNBR_list[[21]] <- raster("E:/Fires_dNBR/dNBR_imagery/VA1964_DeanRiver_dNBR.tif")
+
+###### Topography ######
+DEMslope <- raster("./Inputs/Rasters/DEMslope.tif")
+DEMaspect <- raster("./Inputs/Rasters/DEMaspect.tif")
+DEMtpi <- raster("./Inputs/Rasters/DEMtpi.tif")
+DEMhli <- raster("./Inputs/Rasters/DEMhli.tif")
+
+
+##### Results #####
+#could include Generalize- these describe the BEC subzone/site series
+Results_All <- read_sf("E:/Spatial Data/RESULTS/RESULTS_FirePerimeter_Intersect.shp",
+                       quiet=T)
+Results_sel <- Results_All %>%
+    dplyr::select(OPENING_ID,OPENING_ST,APPROVE_DA,DISTURBANC,DISTURBA_1,DENUDATION, DENUDATI_1, 
+                  DENUDATI_2, DENUDATI_3,
+                  DENUDATI_4,DENUDATI_5,DENUDATI_6,DENUDATI_7, DENUDATI_8, DENUDATI_9, DENUDAT_10, SITE_PREP_,
+                  SITE_PREP1, SITE_PRE_1, SITE_PRE_2, SITE_PRE_3, SITE_PRE_4 ,SITE_PRE_5, PLANTING_1,PLANTING_2,
+                  PLANTING_3, PLANTING_4, PLANTING_5, PLANTING_6, PLANTING_C ,BRUSHING_T,BRUSHING_1, BRUSHING_C,
+                  BRUSHING_2 ,SPACING_TR, SPACING_CO ,SPACING__1, FERTILIZAT,FERTILIZ_1, FERTILIZ_2, PRUNING_TR,
+                  PRUNING_CO ,PRUNING__1,SLOPE,ASPECT)
+
+VRI_study <- read_sf("F:/Spatial Data/Fire/ForestManage_Fire/VRI2016_StudyFires.shp")
+
+##### BEC database ##### 
+#BEC <- read_sf("F:/Spatial Data/BEC/Polygons/BECpolygons.shp")
+```
+
+## 
+
+TotArea = total area of the opening in m2
+Total_Area = area of fire from others calculations
+TotOpenArea calculated here = total area of the opening in ha
+```{r}
+dt <- data.table()
+Plantations <- data.table()
+for(j in 2:length(Fire_shortList)){
+  dt <- fread(paste0("./Outputs/IndividualFires/",Fire_shortList[j],"_Firedat.csv"))
+  dt[, ':='(FireID = Fire_shortList[j])]
+  dt[,.N,by=OPENING_ID]
+  dt[,.N]
+  Plantations <- rbind(Plantations,dt,fill=TRUE)
+}
+Plantations <- merge(Plantations,study_fireTable, by="FireID")
+############ sCALE dNBR ############
+Plantations[,dNBR_sc:= Mn_dNBR*1000]
+Plantations[,sur_dNBR_sc:= sur_dNBR*1000]
+Plantations[,PlantAgeCat := ifelse(PlantAge<11,1,
+                                   ifelse(PlantAge<21,2,
+                                          ifelse(PlantAge<31,3,
+                                                 ifelse(PlantAge<41,4,
+                                                        ifelse(PlantAge<51,5,6)))))]
+
+#change every NA to a 0:
+#for (i in seq_along(Plantations)) set(Plantations, i=which(is.na(Plantations[[i]])), j=i, value=0)
+```
+
+Phil request - Lat longs added as columns
+```{r}
+#Get the openings that are part of the plantations dataset
+Open_geo <- Results_sel %>%
+  dplyr::select(OPENING_ID, geometry) %>%
+  filter(OPENING_ID %in% Plantations$OPENING_ID)
+#Get the centroid of polygon
+Open_cent <- st_centroid(Open_geo)
+#transform to unprojected lat/long
+Open_cent <- st_transform(Open_cent, crs="+proj=longlat +datum=WGS84 +no_defs")
+#create data table
+Open_centDT <- as.data.table(Open_cent)
+Open_centDT_latLong <- as.data.table(st_coordinates(Open_cent))
+Open_centDT <- Open_centDT[,.(OPENING_ID,X=Open_centDT_latLong$X, Y=Open_centDT_latLong$Y)]
+
+Plantations <- merge(Plantations, Open_centDT, by="OPENING_ID")
+```
+
+
+Remove plantations that are younger than the pre-fire imagery
+- it's possible that the young plantations may be younger than the imagery used to capture fire impacts - check here
+should maybe move this to the MakeFireDataTable.R script?
+
+```{r}
+########## remove plantations that are too young ############
+preDNBR <- dNBR_imageryDates[PrePost_Fire=="Pre-fire"]
+postDNBR <- dNBR_imageryDates[PrePost_Fire=="Post-fire"]
+preDNBR[, PreDate:=as.Date(ImageDate2,format="%d/%m/%Y")]
+postDNBR[, PostDate:=as.Date(ImageDate2,format="%d/%m/%Y")]
+FireMinDate <- preDNBR[,.(OldestDNBR = min(PreDate)),by="FireNumber"] #what is the oldest date for pre-fire imagery for a fire
+range(format(FireMinDate[,OldestDNBR],"%m")) #when was preimagery taken
+range(format(postDNBR[,PostDate],"%m")) #when was postimagery taken
+FireStartdNBR <- merge(study_fireTable[FireID %in% Fire_shortList,.(FireID,FireName,StartDate)],
+                       FireMinDate, by.x="FireID", by.y="FireNumber")
+FireStartdNBR[,MinPlantAge := as.numeric(format(as.Date(StartDate,format="%d/%m/%Y"),"%Y"))-
+                as.numeric(format(OldestDNBR,"%Y"))]
+Plantations <- Plantations[PlantAge>=max(FireStartdNBR[,MinPlantAge])] #using 3 myear minimum for now
+##############################################################
+```
+
+
+
+
+Bring in the detailed RESULTS data here
+```{r }
+##### ADD DETAILED SP AND PLANTS #####
+dt <- data.table()
+SitePrep <- data.table()
+for(i in 2:14){ #fire C50647 is missing 49 entries
+  dt <- fread(paste0("./Outputs/IndividualFires/",Fire_shortList[i],"_Firedat_SitePrep_MethAdds.csv"),
+                     na.strings=c("","NA","<NA>"))
+  
+  cols <-c("SITE_PREP_","SITE_PRE_2",colnames(dt)[grepl("Type",colnames(dt))]) #get type and area
+  AreaCols <- c("SITE_PREP1","SITE_PRE_3",colnames(dt)[grepl("Area",colnames(dt))])
+  cols <- cols[grepl("SITE",cols)]
+  AreaCols <- AreaCols[grepl("SITE",AreaCols)]
+  dt[, (cols):=lapply(.SD, as.factor),.SDcols=cols]
+  dt[, (AreaCols):=lapply(.SD, as.numeric),.SDcols=AreaCols]
+  #column of SP type
+  SitePrepType_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                      measure.vars = cols,
+                      variable.name = "SP",
+                      value.name = c("SP_type"),value.factor=TRUE)
+  #Column of SP area
+  SitePrepArea_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                      measure.vars = AreaCols,
+                      variable.name = "SP",
+                      value.name = c("SP_Area"),value.factor=FALSE)
+ 
+  #Site prep method (pburn, trail, knock down etc.)
+  cols <- colnames(dt)[grepl("Meth",colnames(dt))]
+  cols <- cols[grepl("SITE",cols)]
+  dt[, (cols):=lapply(.SD, as.factor),.SDcols=cols]
+  SitePrepMeth_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                        measure.vars = cols,
+                        variable.name = "SP_",
+                        value.name = "SP_Method",value.factor=TRUE)
+  #Site prep date
+  cols <-c("SITE_PRE_1","SITE_PRE_4",colnames(dt)[grepl("Date",colnames(dt))])
+  cols <- cols[grepl("SITE",cols)]
+  dt[, (cols):=lapply(.SD,function(x) as.numeric(format(as.Date(x,tryFormats=c("%d/%m/%Y",
+                                                                               "%d-%m-%Y",
+                                                                               "%Y/%m/%d",
+                                                                               "%Y-%m-%d")),"%Y"))),.SDcols=cols]
+  SitePrepDate_melt <- melt(dt, id.vars = c("OPENING_ID"),
+                        measure.vars = cols,
+                        variable.name = "SP_3",
+                        value.name = "SP_Date")
+  
+  
+  SitePr <- SitePrepType_melt[,.(OPENING_ID,SP_type,
+                                   SP_Method = SitePrepMeth_melt[,SP_Method],
+                                   SP_Date = SitePrepDate_melt[,SP_Date],
+                                 SP_Area=SitePrepArea_melt[,SP_Area])]
+  SitePr <- SitePr[, SP_type_meth:= paste0(SP_type,"_",SP_Method)]
+  SitePr[, ':='(FireID = Fire_shortList[i])]
+  SitePrep <- rbind(SitePrep,SitePr,fill=TRUE)
+}
+unique(SitePrep$SP_type_meth)
+table(SitePrep$SP_type_meth) #WATCH THAT THERE ARE NO NEW COMBINATIONS WITH NEW DATA ENTERED!!
+SitePrep[SP_type_meth=="BU_LRIP"]
+
+SitePrep[,SPgrUse:=1]
+#SitePrep <- SitePrep[!is.na(SP_type)&!is.na(SP_Method)]
+SitePrep[,.N,by="SP_type_meth"]
+SitePrep[SP_type_meth=="ME_WINDP"]
+
+##### OPTION 1: USE GROUPING VARIABLE NAMES ####
+#Bring in the grouping variable - only site preps of interest are kept
+SitePrep <- merge(SitePrep,SitePrepGroups,by.x="SP_type_meth", by.y="Type_Method", all.x=TRUE) #51236
+#SitePrep[!is.na(GroupName)]
+
+#groupname only
+SitePrepCast <- dcast(SitePrep, OPENING_ID~GroupName, value.var ="SPgrUse",fun.aggregate=sum)
+#change all values > 0 to 1s - presence/absence of a given treatment
+for (i in seq_along(SitePrepCast)) set(SitePrepCast, i=which(SitePrepCast[[i]]>0), j=i, value=1)
+
+#sum the area treated by grouping
+AreaTreated <- SitePrep[,.(TreatArea=sum(na.omit(SP_Area))),by=c("OPENING_ID","GroupAreaNm")]
+dAreaTreated <- dcast(AreaTreated, OPENING_ID~GroupAreaNm, value.var="TreatArea",fun.aggregate = sum)
+SitePrepCast <- merge(SitePrepCast,dAreaTreated,by="OPENING_ID",all.x=TRUE)
+
+#merge with the main dataset and make sure any opening without a value has a zero.
+SitePrep2 <- merge(SitePrepCast,SitePrep[,.(OPENING_ID,FireID)], by="OPENING_ID", all.y=TRUE)
+#change nas to 0s
+for (i in seq_along(SitePrep2)) set(SitePrep2, i=which(is.na(SitePrep2[[i]])), j=i, value=0)
+SitePrep2<- unique(SitePrep2)
+SitePrep2[which(duplicated(SitePrep2[,OPENING_ID]))]
+#write.csv(SitePrep,"./Inputs/SitePrep.csv",row.names = FALSE)
+
+Plant_SP <- merge(Plantations,SitePrep2, by=c("OPENING_ID","FireID"), all.x=TRUE)
+#MISSING RESULTS DATA from 50 openings in C50647 - would take 30 minutes to do
+Plant_SP <- Plant_SP[!is.na(BroadBurn),] #need to update this when add those openings
+cols <- c("BroadBurn","PileBurn","WBurn","Chemical","DebrisMade","DebrisPiled", "GrassSeed",
+          "Landings","Layout","MechUnk","None","Soil","SpotBurn","Trail")
+#change the site prep method columns to factors
+Plant_SP[,(cols):=lapply(.SD, as.factor),.SDcols=cols] #make sure site prep methods are factors
+#hist(Plant_SP[SpotBurn==1]$SpotBurn_Area)
+
+Plant_SP[,NoBurn:=as.factor(ifelse(PileBurn==0 & BroadBurn== 0 & SpotBurn==0 & WBurn==0,1,0))]
+Plant_SP[,AnyBurn:=as.factor(ifelse(PileBurn==1 | BroadBurn== 1 | SpotBurn==1 | WBurn==1,1,0))]
+Plant_SP[,PileNoBurn:=as.factor(ifelse(DebrisPiled ==1 & BroadBurn == 0 | 
+                                         DebrisPiled ==1 & SpotBurn == 0 | 
+                                         DebrisPiled ==1 & PileBurn==0,1,0))]
+Plant_SP[,DebrisMade_Burn:=as.factor(ifelse(DebrisMade ==1 & BroadBurn == 1 | 
+                                         DebrisMade ==1 & SpotBurn == 1 | 
+                                         DebrisMade ==1 & PileBurn==1,1,0))]
+Plant_SP[,SoilDist_Burn:=as.factor(ifelse(Soil ==1 & BroadBurn == 1 | 
+                                         Soil ==1 & SpotBurn == 1 | 
+                                         Soil ==1 & PileBurn==1,1,0))]
+
+
+##### write out the full csvs with site prep methods added
+FiresOfInterest <- c("C20735","C50744","C20729","C10784","C10970", "R11796",
+                    "R11498","G41607", "G51632", "R21721", "C11937",  "R11921")
+for(ii in 1:length(FiresOfInterest)){
+  write.csv(Plant_SP[FireID==FiresOfInterest[ii]],
+            paste0("./Outputs/IndividualFires/",FiresOfInterest[ii],"_Firedat_SP.csv"),
+            row.names = FALSE)
+}
+
+
+```
+
+Add fire weather for the plantations based on the day they burned
+```{r}
+Fires_2017 <-c("K20637","C20735","C50647","C50744","C20729","C10784","C10970")
+Fires_2018 <-c("R11796","R11498","G41607", "G51632", "R21721", "C11937","R11921")
+
+Plant_SP[FireID %in% Fires_2017, CalDOB := as.Date(Md_DOB, origin=as.Date("2017-01-01"))]
+Plant_SP[FireID %in% Fires_2018, CalDOB := as.Date(Md_DOB, origin=as.Date("2018-01-01"))]
+fw_cols <- c("bui","dc","dmc","dsr","ffmc","fwi","humidity","isi","precipitation","sdmc","temperature","wind")
+fw_means <- fw[, lapply(.SD, function(x)na.omit(mean(x))), .SDcols = fw_cols,by=c("Fire_ID","Date")]
+merge(fw_means,Plant_SP,by.x="Date",by.y="CalDOB")
+
+
+```
+
+
+
+```{r}
+Plant_SP <- Plant_SP[FireID!="C20729"]
+
+
+ggplot(Plant_SP[NoBurn==1])+
+  geom_histogram(aes(x=PlantAge,colour=FireID, fill=FireID))
+
+a <- ggplot(Plant_SP)+
+  geom_boxplot(aes(x=BroadBurn, y=dNBR_sc,colour=FireID))
+b <- ggplot(Plant_SP)+
+  geom_boxplot(aes(x=SpotBurn, y=dNBR_sc,colour=FireID))
+c <- ggplot(Plant_SP)+
+  geom_boxplot(aes(x=PileBurn, y=dNBR_sc,colour=FireID))
+d <- ggplot(Plant_SP)+
+  geom_boxplot(aes(x=PileNoBurn, y=dNBR_sc,colour=FireID))
+ggarrange(a,b,c,d, common.legend = TRUE)
+
+ggplot(Plant_SP, aes(x=BA_VRI, y=dNBR_sc, colour=FireID,alpha=0.5))+
+  geom_point()+
+  geom_smooth()+
+  facet_wrap(~FireID)
+
+ggplot(Plant_SP, aes(x=PlantAge, y=dNBR_sc, colour=FireID,alpha=0.5))+
+  geom_point()+
+  geom_smooth()+
+  facet_wrap(~FireID)
+
+
+
+```
+
+
+Deal with surrounding forest - i need to update and remember what this is about - can skip.
+```{r}
+### Surrounding forest 
+PrSurAgeFT <- melt(Plantations, id.vars= "OPENING_ID",
+                   measure.vars =  c("SurY-Dec","SurY-50_50", "SurY-75Con", "SurY-Con", "SurIM-Con","SurIM-50_50",
+                                     "SurIM-75Con","SurIM-Dec","SurM-50_50", "SurM-75Con","SurM-Con",
+                                     "SurM-Dec","SurNA-NF"), 
+                   variable.name = "SurAgeFT",
+                   value.name = "SurPr_AgeFT")
+PrMatPine <- melt(Plantations, id.vars= "OPENING_ID",
+                   measure.vars =  c("SurM-PineMix","SurM-75Pine", "SurM-Pine"), 
+                   variable.name = "SurMatPine",
+                   value.name = "SurPr_AgePine")
+PrSurBS <- melt(Plantations, id.vars="OPENING_ID",
+                measure.vars = c("Sur-High","Sur-Medium","Sur-Low","Sur-Unburned"),
+                variable.name = "SurBS",
+                value.name = "SurPr_BS")
+PrSurPlaCl <- melt(Plantations, id.vars="OPENING_ID",
+                measure.vars = c("Sur-AgeCl-1","Sur-AgeCl-2","Sur-AgeCl-3","Sur-AgeCl-4","Sur-AgeCl-5"),
+                variable.name = "SurPlaCl",
+                value.name = "SurPr_PlaCl")
+
+Plantations_SurBS <- merge(Plantations,PrSurBS, by="OPENING_ID")
+Plantations_SurAgeFT <- merge(Plantations,PrSurAgeFT, by="OPENING_ID")
+Plantations_SurMatPine <- merge(Plantations,PrMatPine, by="OPENING_ID")
+Plantations_SurPlaCl <- merge(Plantations,PrSurPlaCl, by="OPENING_ID")
+
+#add up all the area in plantations surrounding a plantation (no age)
+Plantations <- merge(Plantations,PrSurPlaCl[,.(SurTotPlArea =sum(na.omit(SurPr_PlaCl))),by="OPENING_ID"], by="OPENING_ID")
+Plantations[,SurTotPlArea:=ifelse(SurTotPlArea<1,SurTotPlArea,1)]
+
+#Change to years since previous fire
+cols <- colnames(Plantations)[grep("^*[0-9]",colnames(Plantations))]
+PrevFire <- melt(Plantations, id.vars= "OPENING_ID",
+                   measure.vars =  cols, 
+                   variable.name = "PrevFireYr",
+                   value.name = "PrevFirePr")
+PrevFire <- merge(Plantations[,.(OPENING_ID,StartDate)],PrevFire, by="OPENING_ID")
+PrevFire[,StartYear := as.numeric(format(as.Date(StartDate,format="%d/%m/%Y"),"%Y"))]
+PrevFire[,PrevFireYr := as.numeric(format(as.Date(PrevFireYr,format="%Y"),"%Y"))]
+PrevFire[,TSPreF := ifelse(is.na(PrevFirePr),NA, StartYear - PrevFireYr)]
+#the calculation above says any proportion of previous fire counts
+
+#get rid of the year columns:
+Plantations[,(cols):=NULL,with=FALSE]
+Plantations <- merge(Plantations,
+                     PrevFire[!is.na(PrevFirePr),.(NumPrevFires=.N, MinTSPF=min(TSPreF)),by=OPENING_ID],
+                     by="OPENING_ID",all.x=TRUE)
+#change all NAs to 0
+for (i in seq_along(Plantations)) set(Plantations, i=which(is.na(Plantations[[i]])), j=i, value=0)
+#write.csv(Plantations, "./Inputs/Plantations.csv",row.names = FALSE)
+
+############# Combining polygons that have been re-numbered #############
+#PlantReNum <- ResultsPolyOverlap[PropResOverlap==1]
+#overlapFull <- Results_sel %>%
+ # filter(OPENING_ID %in% c(PlantReNum$OPENING_ID,PlantReNum$OPENING_ID.1))
+#write_sf(overlapFull,"overlapFull.shp")
+#Plantations[OPENING_ID %in% PlantReNum$OPENING_ID.1]
+#Plantations[OPENING_ID %in% c(-512650000,1658741)]
+#Plantations[OPENING_ID %in% PlantReNum[1]]
+#PlantOver <- merge(Plantations,ResultsPolyOverlap, by="OPENING_ID", all.y=T)
+#overlapPlantations[PropResOverlap>0.9] #polygons with 100% overlap (30)
+```
+
+
+This is for the plantations skips full manuscript
+```{r}
+#need to define debris management:
+Plant_SP[DebrisPiled=="1" & DebrisBurn =="1"|DebrisPiledBurn=="1",
+         DPile_DBU:= as.factor("1")] #if Debris piled and burned
+Plant_SP[DebrisPiled=="1" & DebrisBurn =="0",
+         DPileNo_BU:= as.factor("1")] #if Debris made and no burning - maybe include wildfire
+
+#Made but not burned and no soil == Fuels left
+Plant_SP[DebrisMade== "1" & DebrisBurn=="0" & DebrisPiledBurn=="0" & BroadBurn=="0" & Soil=="0"|
+           DebrisPiled== "1" & DebrisBurn=="0" & DebrisPiledBurn=="0" & BroadBurn=="0" & Soil=="0", 
+         FuelLeft:= as.factor("1")]
+
+Plant_SP[DebrisMade=="1" & DebrisPiled=="1" & DebrisBurn=="1" & DebrisPiledBurn=="0" & BroadBurn=="0" & Soil=="0"| 
+          DebrisMade=="1" & DebrisPiled=="0" & DebrisBurn=="0" & DebrisPiledBurn=="0" & BroadBurn=="1" & Soil=="0"|
+           DebrisMade=="1" & DebrisPiled=="0" & DebrisBurn=="0" & DebrisPiledBurn=="1" & BroadBurn=="0" & Soil=="0"|
+           DebrisMade=="1" & DebrisPiled=="0" & DebrisBurn=="0" & DebrisPiledBurn=="0" & BroadBurn=="0" & Soil=="1"|
+           DebrisMade=="0" & DebrisPiled=="1" & DebrisBurn=="1" & DebrisPiledBurn=="0" & BroadBurn=="0" & Soil=="0"|
+           DebrisMade=="0" & DebrisPiled=="0" & DebrisBurn=="1" & DebrisPiledBurn=="0" & BroadBurn=="0" & Soil=="0"|
+           DebrisMade=="0" & DebrisPiled=="1" & DebrisBurn=="1" & DebrisPiledBurn=="0" & BroadBurn=="0" & Soil=="1"|
+           DebrisMade=="0" & DebrisPiled=="0" & DebrisBurn=="0" & DebrisPiledBurn=="1" & BroadBurn=="0" & Soil=="1"|
+           DebrisMade=="0" & DebrisPiled=="1" & DebrisBurn=="0" & DebrisPiledBurn=="0" & BroadBurn=="0" & Soil=="1"|
+           DebrisMade=="0" & DebrisPiled=="1" & DebrisBurn=="0" & DebrisPiledBurn=="0" & BroadBurn=="1" & Soil=="0"|
+           DebrisMade=="0" & DebrisPiled=="1" & DebrisBurn=="0" & DebrisPiledBurn=="0" & BroadBurn=="1" & Soil=="1",
+         FuelGone:= as.factor("1")]
+
+#then do glms that compare all this treatment info together, or just soil on its own?
+summary(lmer(dNBR_sc ~ SitePrepped + Fertil + Prune + Spaced + Brushed + Planted + HarvType + 
+                          PlantAge +DecVRICov + ConVRICov + PineVRICov + FirVRICov + SpruVRICov + DFirVRICov + 
+                          BA_VRI + CanopCloVRI + HeightVRI + TotArea + SurBA + SurTotPlArea + sur_dNBR + 
+                          SurMCon + DEM_Slop + DEM_tpi + DEM_hli + Md_DOB +  (1|FireID), 
+                        data = Plant_SP))
+
+
+Plant_SP[DebrisPiled== "1" & DebrisBurn=="1" | 
+           DebrisPiled== "1" & DebrisPiledBurn=="1" | 
+           DebrisPiledBurn=="1" |
+           DebrisPiled== "1" & BroadBurn=="1", DPile_DBU:= as.factor("1")] #these will also include debris made
+Plant_SP[DMadeNo_BU==1]
+
+#I want to know what the treatments were that would lead to a debris being made but not burned
+Plant_SP[BroadBurn==1]
+
+#the subset of sites that had debris piled:
+Plant_SP[DPile_DBU==1,.N] #12 piled and not burned, 80 piled and burned - that seems low
+Plant_SP[DPileNo_BU=="1"|DPile_DBU=="1"]
+ggplot(Plant_SP, aes(x=FuelGone,y=Mn_dNBR))+
+  geom_boxplot()
+ggplot(Plant_SP, aes(x=Soil,y=Mn_dNBR))+
+  geom_boxplot()
+
+a <-ggplot(Plant_SP, aes(x=BroadBurn,y=Mn_dNBR))+
+  geom_boxplot()
+b <-ggplot(Plant_SP, aes(x=DebrisBurn,y=Mn_dNBR))+
+  geom_boxplot()
+c <-ggplot(Plant_SP, aes(x=DebrisMade,y=Mn_dNBR))+
+  geom_boxplot()
+d <-ggplot(Plant_SP, aes(x=DebrisPiled,y=Mn_dNBR))+
+  geom_boxplot()
+e <-ggplot(Plant_SP, aes(x=Soil,y=Mn_dNBR))+
+  geom_boxplot()
+ggarrange(a,b,c,d,e, ncol=3, nrow=2)
+
+summary(glm(Mn_dNBR ~ Soil, data=Plant_SP))
+summary(glm(Mn_dNBR ~ DebrisPiled, data=Plant_SP))
+summary(glm(Mn_dNBR ~ DebrisMade, data=Plant_SP))
+summary(glm(Mn_dNBR ~ DebrisBurn, data=Plant_SP))
+summary(glm(Mn_dNBR ~ BroadBurn, data=Plant_SP)) #so unbalanced
+t.test(Plant_SP[Soil==0]$Mn_dNBR, Plant_SP[Soil==1]$Mn_dNBR, var.equal = FALSE)
+t.test(Plant_SP[DebrisPiled==0]$Mn_dNBR, Plant_SP[DebrisPiled==1]$Mn_dNBR, var.equal = FALSE)
+t.test(Plant_SP[DebrisMade==0]$Mn_dNBR, Plant_SP[DebrisMade==1]$Mn_dNBR, var.equal = FALSE)
+t.test(Plant_SP[DebrisBurn==0]$Mn_dNBR, Plant_SP[DebrisBurn==1]$Mn_dNBR, var.equal = FALSE)
+t.test(Plant_SP[BroadBurn==0]$Mn_dNBR, Plant_SP[BroadBurn==1]$Mn_dNBR, var.equal = FALSE)
+
+ggplot(SitePrep[!is.na(GroupName)],aes(x=SP_Date, fill=GroupName))+
+  geom_histogram(position = "stack")
+ggplot(SitePrep[GroupName=="BroadBurn"],aes(x=SP_Date, fill=GroupName))+
+  geom_histogram()+
+  xlim(c(1960,2020))+
+  theme(text=element_text(size=20)) 
+
+ggplot(SitePrep[GroupName=="DebrisMade"|GroupName=="DebrisBurn"],aes(x=SP_Date, fill=GroupName))+
+  geom_histogram()+
+  xlim(c(1960,2020))+
+  theme(text=element_text(size=20))
+  
+ggplot(SitePrep[GroupName=="Soil"],aes(x=SP_Date, fill=SP_Method))+
+  geom_histogram()+
+  xlim(c(1960,2020)) +
+  theme(text=element_text(size=20))
+
+#############################################################
+
+#Planting Species - not done. Need to decide what is important
+PlantType_melt <- melt(FireDetRes, id.vars = c("OPENING_ID"),
+                      measure.vars = c("PLANTING_1","PLANTING_4",
+                                       "PLANT_3_Type",
+                                       "PLANT_4_Type",
+                                       "PLANT_5_Type",
+                                       "PLANT_6_Type"),
+                      variable.name = "PL",
+                      value.name = "PL_type")
+
+#Planting Density
+PlantSp_melt <- melt(FireDetRes, id.vars = c("OPENING_ID"),
+                      measure.vars = c("PLANT_1_SP1",
+                                       "PLANT_1_SP1",
+                                       "PLANT_1_SP1",
+                                       "PLANT_1_SP1",
+                                       "PLANT_1_SP1",
+                                       "PLANT_1_SP1"),
+                      variable.name = "SP_",
+                      value.name = "SP_Method")
+#Planting Date
+SitePrepMeth_melt <- melt(FireDetRes, id.vars = c("OPENING_ID"),
+                      measure.vars = c("SITEPr_1_Meth",
+                                       "SITEPr_2_Meth",
+                                       "SITEPr_3_Meth",
+                                       "SITEPr_4_Meth",
+                                       "SITEPr_5_Meth",
+                                       "SITEPr_6_Meth"),
+                      variable.name = "SP_",
+                      value.name = "SP_Method")
+
+```
+
+
+```{r}
+###### SUMMARIES #######
+Plantations[,TotOpenArea:=TotArea/10000] #area of the RESULTS opening
+Plantations[,.N,by=OPENING_ID]
+Plantations[,.N]
+#check to make sure all the plantations are in fact plantations:
+Plantations[,.N,c("DENUDATION","DENUDATI_5")]
+Plantations[DENUDATION =="B" & is.na(DENUDATI_5)] #sites just with Burn call have site prep and planting. Good.
+Plantations[DENUDATION =="W" & is.na(DENUDATI_5)] #same with windthrow
+Plantations[DENUDATION =="L" & DENUDATI_5=="D"]
+###########
+
+```
+
+
+### 
+```{r}
+ggplot(PlantationsAge, aes(FireID, PlantAge))+
+  geom_boxplot()
+
+## graphs of proportion burned by plantation age
+a <- ggplot(PlantationsAge,aes(y=Unburned, x=PlantAge))+
+  geom_point()+
+  geom_smooth(method = "gam")+
+  ylim(0,1)
+b <- ggplot(PlantationsAge,aes(y=Low, x=PlantAge))+
+  geom_point()+
+  geom_smooth(method = "gam")+
+  ylim(0,1)
+c <- ggplot(PlantationsAge,aes(y=Medium, x=PlantAge))+
+  geom_point()+
+  geom_smooth(method = "gam")+
+  ylim(0,1)
+d <- ggplot(PlantationsAge,aes(y=High, x=PlantAge))+
+  geom_point()+
+  geom_smooth(method = "gam")+
+  ylim(0,1)
+ggarrange(a,b,c,d)
+```
+
+## Treatments
+Here I'm adding the site treatments associated with openings 
+```{r}
+###### TREATMENTS (0,1) ########
+PlantationsAge[,Spaced := ifelse(SPACING__1==0,0,1)]
+PlantationsAge[,Brushed := ifelse(BRUSHING_1==0,0,1)]
+PlantationsAge[,SitePrepped := ifelse(SITE_PRE_5==0,0,1)]
+PlantationsAge[,Fertil := ifelse(FERTILIZ_2==0,0,1)]
+PlantationsAge[,Prune := ifelse(PRUNING__1==0,0,1)]
+
+####### Making sure the severity is 0 if there was none (not NA)
+PlantationsAge[,High:= ifelse(is.na(High),0,High)]
+PlantationsAge[,Medium:= ifelse(is.na(Medium),0,Medium)]
+PlantationsAge[,Low:= ifelse(is.na(Low),0,Low)]
+PlantationsAge[,Unburned:= ifelse(is.na(Unburned),0,Unburned)]
+############################
+
+#summary information about openings in these study fires:
+PlantationsAge[,.N,by=FireID]
+#elephant hill has way more than others
+PlantationsAge[,max(PlantAge),by=FireID]
+PlantationsAge[is.na(PLANTING_1) & is.na(PLANTING_4),.N,by=FireID] #number of unplanted openings
+PlantationsAge[is.na(PLANTING_1) & is.na(PLANTING_4),min(PlantAge),by=FireID] #age of unplanted openings
+
+write.csv(PlantationsAge,"./Outputs/PlantationsAge.csv", row.names=FALSE)
+
+
+```
+
+
+## Fire-level summaries
+### Fire Severity in plantations vs. Total Fire
+- Do we want to look at plantations vs. not plantations, or is it plantations vs. total fire (how it is now)
+```{r}
+#total area of the fire
+fires <- fire_per_sel %>% filter(FIRE_NUMBE %in% Fire_shortList)
+fires$TotFireArea <- st_area(fires)
+firesDT <- as.data.table(fires)
+firesDT[,TotFireArea := unclass(TotFireArea)/10000]
+firesDTmerge <- firesDT[,.(FIRE_NUMBE,FIRE_YEAR,TotFireArea)]
+firesDT[,sum(TotFireArea)]
+############## All plantations summed ##########
+#figuring out area wthin each fire severity category for the whole fire  - might have done this already??
+Fire_Sev <- severity_sel %>% filter(FIRE_NUMBE %in% Fire_shortList)
+#For every fire, calculate the area (ha) of each severity polygon
+Fire_Sev$FireSevArea <- st_area(Fire_Sev)
+Fire_SevDT <- as.data.table(Fire_Sev)
+FireSevSum <- Fire_SevDT[,round(sum(unclass(FireSevArea)/10000),0),by=c("FIRE_NUMBE","BURN_SEVER")]
+setnames(FireSevSum,"V1","FireSev")
+#Openings and fire severity
+PlantAgeLong <- melt(PlantationsAge[,.(FireID,OPENING_ID,High,Medium,Low,Unburned,TotOpenArea)],
+                     id.vars = c("FireID","OPENING_ID","TotOpenArea"))
+PlantAgeLong[,PropArea:= value*TotOpenArea]
+PlantSevSum <- PlantAgeLong[,round(sum(na.omit(PropArea)),0),by=c("FireID","variable")]
+setnames(PlantSevSum,"V1","PlantSev")
+PlantFire_Sev <- merge(FireSevSum,PlantSevSum, by.x=c("FIRE_NUMBE","BURN_SEVER"),by.y=c("FireID","variable"))
+PlantFire_Sev_Tot <- merge(PlantFire_Sev,firesDTmerge, by="FIRE_NUMBE")
+PlantFire_Sev_Tot[,sum(PlantSev),by="FIRE_NUMBE"]
+PlantFire_Sev_Tot[,sum(PlantSev)]
+PlantFire_Sev_Tot[,sum(PlantSev)]
+
+
+
+############### Unioned together ##############
+#versus when unioned together (accounting for spatial overlap)
+Plant_union <- fread("./Outputs/IndividualFires/PropBurnDat.csv")
+Plant_union <- Plant_union %>% filter(FIRE_NUMBE %in% Fire_shortList)
+Plant_union[,sum(PlantAreaSev),by="FIRE_NUMBE"]
+Plant_union[,sum(na.omit(PlantAreaSev))] #unioned ==22713 - can't be right
+
+
+PlantFire_Sev_PlUnion <-merge(PlantFire_Sev,Plant_union, by=c("FIRE_NUMBE","BURN_SEVER"))
+
+```
+
+
+
+need to reduce the openings to only those that count as plantations. Sheena and Ingrid populated all of them.
+```{r}
+#
+SitePrep[SP_Method=="DISC"|SP_Method=="SHARK"|SP_Method=="",SP_group := "SoilPrep"]
+
+
+SitePrep[,.N,by=SP_type_meth]
+SitePrep[,.N,by=SP_Method]
+
+SitePrep[SP_Method=="PILE"]
+
+ggplot(SitePrep)+
+  geom_histogram(aes(x=SP_Date, fill=SP_Method), position="stack")
+
+###### Treatment grouping #####
+#treatments that mix the mineral soil:
+SoilMix <- c("DISC","MOUND","CHAIN","SHARK","LRIP")
+FlattenVeg <- c("","HAND","KNOCK")
+TreePiling <- c("RPILE")
+BurnTr <- c("SPOT","BROAD","LAND")
+
+SitePrep[,.()]
+
+
+
+ResultsSP <- merge(FireDetRes[,.(OPENING_ID, FireID, Num_SitePr=SITE_PRE_5)],SitePrep,by="OPENING_ID")
+ResultsSP_PA <- merge(PlantationsAge[FireID %in% Fire_shortList[c(8,9,12)],.(FireID,OPENING_ID,OPENING_ST,
+                                                                           SLOPE, ASPECT,High,Low,
+                                                                           Medium, Unburned, TotArea,
+                                                                           FIRE_YEAR, PropPfire,PlantAge,
+                                                                           Spaced,Brushed,SitePrepped,
+                                                                           Fertil,Prune)],
+                      ResultsSP, by=c("OPENING_ID","FireID"), all=TRUE)
+
+
+
+
+```
+
+
+
