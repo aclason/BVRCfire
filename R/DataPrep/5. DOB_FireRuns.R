@@ -28,40 +28,34 @@ DOB_list <- list.files(paste0(SpatialFilesPath,"./Inputs/DOB/DOBrounded/"),
 print(paste("there are", length(DOB_list), "covariates in the list"))
 DOB_list <- DOB_list[!grepl("xml", DOB_list)]
 
-
-
-#-----------------DOB to fire runs-----------------#
-DOB <- list()
-count <- list()
-prop_burned <- list()
-runs <- list()
-
 file.name <- c("C10784", "C10970", "C11837", "C11937", "C12594", "C20729", "C20735", "C50647",
                "C50744","G41607", "G51632", "K20637", "R11498", "R11796", "R11921", "R12068", 
                "R12315", "R21721", "VA1787", "VA1964")
 
 
+#-----------------DOB to fire runs-----------------#
 for (i in 1:length(DOB_list)){
-  DOB[[i]] <- raster(DOB_list[[i]])
+  DOB <- raster(DOB_list[i])
   # Round DOB values to whole numbers
-  DOB[[i]] <- round(DOB[[i]], digits = 0)
+  DOB <- round(DOB, digits = 0)
   # Get count for each day
-  count[[i]] <- freq(DOB[[i]])
-  count[[i]] <- as.data.table(count[[i]])
+  count <- freq(DOB)
+  count <- as.data.table(count)
   # Make sure pixels that are NA have NA for count too
-  count[[i]] <- count[[i]] %>% mutate(count = replace(count, is.na(value), NA))
+  count <- count %>% mutate(count = replace(count, is.na(value), NA))
   # Calculate proportion of the fire that burned each day (# pixels burned in a day / total pixels of the fire (*subract NAs))
-  prop_burned[[i]] <- count[[i]] %>% mutate(prop_burned = ((count/(ncell(DOB[[i]]) - (freq(DOB[[i]], value = NA))))*100))
+  prop_burned <- count %>% mutate(prop_burned = ((count/(ncell(DOB) - (freq(DOB, value = NA))))*100))
   # Drop count column
-  prop_burned[[i]] <-subset(prop_burned[[i]], select = -count)
+  prop_burned <-subset(prop_burned, select = -count)
   # Round to 2 decimals
-  prop_burned[[i]] <- prop_burned[[i]] %>% mutate_if(is.numeric,
-                                                         round,
-                                                         digits = 0)
+  prop_burned <- prop_burned %>% mutate_if(is.numeric,
+                                           round,
+                                           digits = 0)
   # Substitute DOB values for prop burned values
-  runs[[i]] <- subs(DOB[[i]], prop_burned[[i]], by = "value", subsWithNA = FALSE)
+  runs <- subs(DOB, prop_burned, by = "value", subsWithNA = FALSE)
   
   # Write rasters
-  writeRaster(runs[[i]], paste0(SpatialFilesPath, "./Inputs/FireRuns/", "FireRun_", file.name[[i]]), format = "GTiff", overwrite = TRUE)
+  writeRaster(runs, paste0(SpatialFilesPath, "./Inputs/FireRuns/", "FireRun_", file.name[i]), format = "GTiff", 
+              overwrite = TRUE)
 }
 
