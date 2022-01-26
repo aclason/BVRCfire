@@ -2,12 +2,12 @@
 # Ingrid Farnell
 # Jan 19, 2021
 
-# This script clips historic fires to our study fires and makes a raster for each fire year 
+# This script makes a raster of time since most recent fire for each study fire.
 
 
 #--------------- Load libraries----------------#
 ls <- c("tidyverse", "data.table") # Data Management and Manipulation
-ls <- append(ls, c("raster", "sf", "rgdal")) # geo comp.
+ls <- append(ls, c("raster", "sf")) # geo comp.
 
 # Install if needed -- then load. 
 new.packages <- ls[!(ls %in% installed.packages()[,"Package"])]
@@ -41,20 +41,44 @@ file.name <- c("C10784", "C10970", "C11837", "C11937", "C12594", "C20729", "C207
 #---------------- Create historic fires rasters---------------#
 for (i in 1:length(base_list)){
   base <- raster(base_list[i])
-  # Get historic fire years > 1960
-  fire_years <- unique(hist_fires$FIRE_YEAR)
-  # Only keep fires older than 1960
-  fire_years <- fire_years[fire_years >= 1960 & fire_years < 2017]
-  for (j in 1:length(fire_years)){
-    hist_years <- hist_fires[hist_fires$FIRE_YEAR == fire_years[j], ]
-    # Rasterize 
-    hist_year_ras <- rasterize(hist_years, base, field = "FIRE_YEAR")
-    # Separate study fires into individual fires
-    unique_fires <- study_fires[study_fires$FIRE_NUMBE == file.name[i], ]  
-    # Mask historic fires with individual study fire
-    hist_ras_mask <- mask(hist_year_ras, mask = unique_fires)
-    # Write rasters
-    writeRaster(hist_ras_mask, paste0(SpatialFilesPath, "./Inputs/HistoricFires/", "HistoricFires_", 
-                                    file.name[i], sep = "_", fire_years[j]), format = "GTiff", overwrite = TRUE)
-  }
+  # Only keep fires between 1960 and 2017
+  hist_fires <- hist_fires %>% filter(FIRE_YEAR >= 1960 & FIRE_YEAR < 2017)
+  # Rasterize - keeping youngest fire i.e. max fire year
+  youngest_fire_ras <- rasterize(hist_fires, base, field = "FIRE_YEAR", fun = max)
+  # Get years since most recent fire ( - 2018)
+  YrSincFire_ras <- calc(youngest_fire_ras, function(x) {2018 - x})
+  # Separate study fires into individual fires
+  unique_fires <- study_fires[study_fires$FIRE_NUMBE == file.name[i], ]
+  # Mask historic fires with individual study fire
+  hist_ras_mask <- mask(YrSincFire_ras, mask = unique_fires)
+  # Make NAs 0
+  hist_ras_mask[is.na(hist_ras_mask[])] <- 0
+  # Make NA outside the fire poly mask
+  hist_ras_mask <- mask(hist_ras_mask, mask = unique_fires)
+  # Write rasters
+  writeRaster(hist_ras_mask, paste0(SpatialFilesPath, "./Inputs/HistoricFires/", "HistoricFires_", file.name[i]),
+              format = "GTiff", overwrite = TRUE)
 }
+
+# NOT USING - but keep for code
+# This script makes a raster for each fire year for each study fire
+
+# for (i in 1:length(base_list)){
+#   base <- raster(base_list[i])
+#   # Get historic fire years > 1960
+#   fire_years <- unique(hist_fires$FIRE_YEAR)
+#   # Only keep fires older than 1960
+#   fire_years <- fire_years[fire_years >= 1960 & fire_years < 2017]
+#   for (j in 1:length(fire_years)){
+#     hist_years <- hist_fires[hist_fires$FIRE_YEAR == fire_years[j], ]
+#     # Rasterize 
+#     hist_year_ras <- rasterize(hist_years, base, field = "FIRE_YEAR")
+#     # Separate study fires into individual fires
+#     unique_fires <- study_fires[study_fires$FIRE_NUMBE == file.name[i], ]  
+#     # Mask historic fires with individual study fire
+#     hist_ras_mask <- mask(hist_year_ras, mask = unique_fires)
+#     # Write rasters
+#     writeRaster(hist_ras_mask, paste0(SpatialFilesPath, "./Inputs/HistoricFires/", "HistoricFires_", 
+#                                       file.name[i], sep = "_", fire_years[j]), format = "GTiff", overwrite = TRUE)
+#   }
+# }
