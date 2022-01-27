@@ -31,6 +31,9 @@ rm(ls, new.packages)
 #--------- Load data -----------------#
 SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
 
+# Study fire perimeters
+study_fires <- read_sf(paste0(SpatialFilesPath, "./Inputs/Study_fire_perimeters/Study_fire_perimeters.shp"))
+
 # Set the fires of interest - all 2018 fires with openings
 study_fireTable <- fread("./Inputs/StudyFireList.csv") # all potential fires
 FiresOfInterest <- c( "R11796","R11498","R21721","R11921", "G41607", "G51632", "C11937")
@@ -105,25 +108,18 @@ base_R21721 <- raster(paste0(SpatialFilesPath, "./Inputs/BaseRasters/BaseRaster_
 
 # dNBR
 dNBR_R21721 <- resample(dNBR_R21721, base_R21721, method = "bilinear")
-
 # DOB
 DOB_R21721 <- resample(DOB_R21721, base_R21721, method = "bilinear")
-
 # Plantation stack
 plantation_R21721 <- resample(plantation_R21721, base_R21721, method = "ngb") # ngb for categorical
-
 # Fire weather
 weather_R21721 <- resample(weather_R21721, base_R21721, method = "bilinear")
-
 # Topography
 topo_R21721 <- resample(topo, base_R21721, method = "bilinear") 
-
 # Fire runs
 run_R21721 <- resample(run_R21721, base_R21721, method = "bilinear")
-
 # VRI
 VRI_R21721 <- resample(VRI_R21721, base_R21721, method = "bilinear")
-
 # Historic fires were made with base raster (so should stack without resampling)
 
 
@@ -206,7 +202,7 @@ R21721_810 <- as.data.frame(R21721_smpl_810_ras)
 R21721_810 <- R21721_810 %>%
   filter(!is.na(R21721_OpenID))
 # Drop opening ID column
-R21721_810 <- subset(R21721_810, select =-c(R21721_OpenID, R21721_OPENING_ID))
+R21721_810 <- subset(R21721_810, select =-c(R21721_OpenID, R21721_OPENING_ID, R21721_SitePrepped, R21721_None))
 
 
 #---------------------5. Run initial RF -----------------------------#
@@ -306,7 +302,7 @@ R21721_270 <- as.data.frame(R21721_smpl_270_ras)
 R21721_270 <- R21721_270 %>%
   filter(!is.na(R21721_OpenID))
 # Drop opening ID column
-R21721_270 <- subset(R21721_270, select =-c(R21721_OpenID))
+R21721_270 <- subset(R21721_270, select =-c(R21721_OpenID, R21721_OPENING_ID, R21721_SitePrepped, R21721_None))
 
 
 #---------------------5. Run initial RF -----------------------------#
@@ -349,3 +345,17 @@ rfmod_R21721_270 %>%
 rfmod_R21721_270 %>%
   partial(pred.var = "R21721_SitePrepped") %>%
   autoplot(rug = TRUE, train = R21721_270)
+
+#---------------------------------- Moran's Index on residuals---------------------------#
+# Residuals
+actual_270 <- R21721_270[,1]
+predicted_270 <- rfmod_R21721_270$predicted
+
+plot(actual_270, actual_270 - predicted_270)
+
+residuals_270 <- actual_270 - predicted_270
+plot(residuals_270)
+
+# Moran's Index
+residuals_270_df <- as.data.frame(residuals_270)
+m.3.q_R21721_270_resid <- Moran(residuals_270_df, w = queen)
