@@ -18,7 +18,7 @@
 
 #--------------- Load libraries----------------#
 ls <- c("tidyverse", "data.table") # Data Management and Manipulation
-ls <- append(ls, c("raster")) # geo comp.
+ls <- append(ls, c("terra")) # geo comp.
 ls <- append(ls, c("randomForest", "pdp")) # analysis
 
 # Install if needed -- then load. 
@@ -31,83 +31,75 @@ rm(ls, new.packages)
 #--------- Load data -----------------#
 SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
 
-# Study fire perimeters
-study_fires <- read_sf(paste0(SpatialFilesPath, "./Inputs/Study_fire_perimeters/Study_fire_perimeters.shp"))
-
 # Set the fires of interest - all 2018 fires with openings
-study_fireTable <- fread("./Inputs/StudyFireList.csv") # all potential fires
-FiresOfInterest <- c( "R11796","R11498","R21721","R11921", "G41607", "G51632", "C11937")
+FiresOfInterest <- c( "G41607", "G51632", "R11498", "R11796","R11921","R21721")
 
-# # Fire weather data - to check for multicollinearity ** I think these have updated - need to use new fire weather instead
-# all_fireweather <- fread("./Inputs/Fireweather/FireWeather.csv")
-# Fireweather <- all_fireweather[Fire_ID %in% FiresOfInterest] # select only fires of interest
-# unique(Fireweather[,Fire_ID]) # make sure it worked
-
-# Rasters -- R21721 Nadina
-# Response variable
-# dNBR
-dNBR_R21721 <- raster(paste0(SpatialFilesPath, "./Inputs/dNBR/dNBR_R21721.tif"))
-
-# Predictor variables
-# DOB
-DOB_R21721 <- raster(paste0(SpatialFilesPath, "./Inputs/DOB/dob_R21721.tif"))
-
-# Plantation
-plantation_list_R21721 <- list.files(paste0(SpatialFilesPath,"./Inputs/PlantationPreds/"),
-                        pattern = "R21721", 
-                        recursive = FALSE, 
-                        full.names=TRUE)
-
-print(paste("there are", length(plantation_list_R21721), "covariates in the list"))
-plantation_list_R21721 <- plantation_list_R21721[!grepl("xml", plantation_list_R21721)]
-plantation_R21721 <- stack(plantation_list_R21721)
-
-# Fire weather
-weather_list_R21721 <- list.files(paste0(SpatialFilesPath,"./Inputs/FireWeather/"),
-                                  pattern = "*_R21721.tif", 
-                                  recursive = FALSE, 
-                                  full.names=TRUE)
-print(paste("there are", length(weather_list_R21721), "covariates in the list"))
-weather_list_R21721 <- weather_list_R21721[!grepl("xml", weather_list_R21721)]
-weather_R21721 <- stack(weather_list_R21721)
-
-# Topography (hli currently taken out)
-topo_list <- list.files(paste0(SpatialFilesPath,"./Inputs/Topography/"),
-                                  pattern = "*.tif", 
-                                  recursive = FALSE, 
-                                  full.names=TRUE)
-print(paste("there are", length(topo_list), "covariates in the list"))
-topo_list <- topo_list[!grepl("xml", topo_list)]
-topo <- stack(topo_list)
-
-# Fire runs
-run_R21721 <- raster(paste0(SpatialFilesPath, "./Inputs/FireRuns/FireRun_R21721.tif"))
-
-# Historic fires
-hist_R21721 <- raster(paste0(SpatialFilesPath, "./Inputs/HistoricFires/HistoricFires_R21721.tif"))
-
-# VRI 
-VRI_list_R21721 <- list.files(paste0(SpatialFilesPath,"./Inputs/VRIpreds/"),
-                         pattern = "R21721",
-                         recursive = FALSE, 
-                         full.names=TRUE)
-print(paste("there are", length(VRI_list_R21721), "covariates in the list"))
-VRI_list_R21721 <- VRI_list_R21721[!grepl("xml", VRI_list_R21721)]
-VRI_R21721 <- stack(VRI_list_R21721)
-
-# BEC (Ingrid to make)
-
+# Rasters
 # Base raster -- to resample rasters
-base_R21721 <- raster(paste0(SpatialFilesPath, "./Inputs/BaseRasters/BaseRaster_R21721.tif"))
+base_list <- list.files(paste0(SpatialFilesPath,"./Inputs/BaseRasters/"),
+                        pattern = paste(FiresOfInterest, sep = "", collapse = "|"),
+                        recursive = FALSE,
+                        full.names = TRUE)
+
+base <- sapply(base_list, rast)
+
+# Create names for base rasters
+baseSplit <- str_split_fixed(base_list, "_", 2)
+base.name <- str_split(baseSplit[,2], ".tif", simplify = TRUE)[,1]
+
+# Give base rasters a name
+names(base) <- base.name
+names(base)
+
+variable_list <- list.files(paste0(SpatialFilesPath, "./Inputs/Rasters/"),
+                            pattern =  paste(FiresOfInterest, sep = "", collapse = "|"),
+                            recursive = TRUE,
+                            full.names = TRUE)
+
+
+variables <- sapply(variable_list, rast)
+
+# Create names for the variables
+variableSplit <- str_split_fixed(variable_list, "/", 9)
+variable.name <- str_split(variableSplit[,9], ".tif", simplify = TRUE)[,1]
+
+# Give each raster variable a name
+names(variables) <- variable.name
+names(variables)
+
+
+ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", "None", 
+                   "OpenID", "OPENING_ID", "PileBurn", "PlantAge", "Prune", "SitePrepped", "Soil", "Spaced", 
+                   "SpotBurn", "WBurn")
 
 
 
 # ------------- Resample rasters to have same extent and resolution-----------------#
 # Using base rasters resample response and predictor variables to same extent and resolution
-# Note - can't have a raster with no data or else it won't resample.. had to remove DEMhli
 
+
+# Using base rasters resample response and predictor variables to same extent and resolution
+
+
+# Resample categorical and continuous variables differently
+for (i in 1:length(variables)) {
+  for (j in 1:length(base)){
+
+  variables_RS <- ifelse (sapply(as.list(variables), function(x) {grepl(paste(ctg_variables, sep = "", collapse = "|"), x)}),
+                        
+                          # I want to use base [fire] to resample variable [fire].... it doesnt work
+                        resample(variables[i[grepl(paste(FiresOfInterest[j], collapse = "|"), variables[i])]] == base[j], base[j], method = "ngb"),
+                        
+                        resample(variables[i[grepl(paste(FiresOfInterest[j], collapse = "|"), variables[i])]] == base[j], base[j], method = "bilinear")
+)
+
+  }
+}
+
+  
+  
 # dNBR
-dNBR_R21721 <- resample(dNBR_R21721, base_R21721, method = "bilinear")
+dNBR <- resample(dNBR, base, method = "bilinear")
 # DOB
 DOB_R21721 <- resample(DOB_R21721, base_R21721, method = "bilinear")
 # Plantation stack
@@ -191,6 +183,10 @@ R21721_smpl_810 <- rasterToPoints(dNBR_R21721_810m, spatial = TRUE)
 # Create raster stack of response and predictor variables
 stack_R21721 <- addLayer(dNBR_R21721, plantation_R21721, DOB_R21721, weather_R21721, hist_R21721, 
                          run_R21721, topo_R21721, VRI_R21721)
+
+for (i in length(base_list)){
+  stack <- c(dNBR, DOB, run, hist, topo, VRI, weather)
+}
 
 # Extract response and predictor raster values at sample points
 R21721_smpl_810_ras <- raster::extract(stack_R21721, R21721_smpl_810)
