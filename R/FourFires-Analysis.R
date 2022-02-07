@@ -18,7 +18,7 @@
 
 #--------------- Load libraries----------------#
 ls <- c("tidyverse", "data.table") # Data Management and Manipulation
-ls <- append(ls, c("terra")) # geo comp.
+ls <- append(ls, c("terra","raster")) # geo comp.
 ls <- append(ls, c("randomForest", "pdp")) # analysis
 
 # Install if needed -- then load. 
@@ -30,13 +30,15 @@ rm(ls, new.packages)
 
 #--------- Load data -----------------#
 SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
-
+SpatialFilesPath <- getwd()
 # Set the fires of interest - all 2018 fires with openings
-FiresOfInterest <- c( "G41607", "G51632", "R11498", "R11796","R11921","R21721")
-
+FiresOfInterest <- c("G41607", "G51632", "R11498", "R11796","R11921","R21721")
+ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", "None", 
+                   "OpenID", "OPENING_ID", "PileBurn", "PlantAge", "Prune", "SitePrepped", "Soil", "Spaced", 
+                   "SpotBurn", "WBurn")
 # Rasters
 # Base raster -- to resample rasters
-base_list <- list.files(paste0(SpatialFilesPath,"./Inputs/BaseRasters/"),
+base_list <- list.files(paste0(SpatialFilesPath,"/Inputs/Rasters/BaseRasters/"),
                         pattern = paste(FiresOfInterest, sep = "", collapse = "|"),
                         recursive = FALSE,
                         full.names = TRUE)
@@ -51,53 +53,53 @@ base.name <- str_split(baseSplit[,2], ".tif", simplify = TRUE)[,1]
 names(base) <- base.name
 names(base)
 
-variable_list <- list.files(paste0(SpatialFilesPath, "./Inputs/Rasters/"),
+# ------------- Read in and resample rasters to have same extent and resolution-----------------#
+# Using base rasters resample response and predictor variables to same extent and resolution
+# Resample categorical and continuous variables differently
+# I think first, just reduce the list to the fires you're interested in:
+
+#get the names of all the rasters we're interested in:
+RastsofInterest <- grep(paste(FiresOfInterest,collapse = "|"), variable.name,value=TRUE)
+RastsofInterest <- grep("BaseRaster", RastsofInterest, value=TRUE, invert=TRUE)
+
+#read in the rasters
+variable_list <- list.files(paste0(SpatialFilesPath, "/Inputs/Rasters/"),
                             pattern =  paste(FiresOfInterest, sep = "", collapse = "|"),
                             recursive = TRUE,
                             full.names = TRUE)
-
-
-variables <- sapply(variable_list, rast)
-
-# Create names for the variables
-variableSplit <- str_split_fixed(variable_list, "/", 9)
-variable.name <- str_split(variableSplit[,9], ".tif", simplify = TRUE)[,1]
-
-# Give each raster variable a name
+variable_list <- grep("tif",variable_list,value=TRUE)
+variable_list <- grep(paste(FiresOfInterest, collapse = "|"),variable_list,value=TRUE) #only import the fires of interest
+variables <- sapply(variable_list, raster)
+#variables <- sapply(variable_list, rast) #if we want to use rast instead?
+#rename the 
+variable.name <- lapply(str_split(variable_list,"/"),function(x) grep(".tif",x, value=TRUE))
+variable.name <- str_split(variable.name, ".tif", simplify = TRUE)[,1]
 names(variables) <- variable.name
-names(variables)
+#ID the names of the categorical rasters
+CatRasts <- grep(paste(ctg_variables,sep = "", collapse = "|"),variable.name,value=TRUE)
 
 
-ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", "None", 
-                   "OpenID", "OPENING_ID", "PileBurn", "PlantAge", "Prune", "SitePrepped", "Soil", "Spaced", 
-                   "SpotBurn", "WBurn")
+for(i in 1:length(FiresOfInterest)){
+  allFireRasts <- variables[grep(FiresOfInterest[i],variables)]
+  baseFireRast <- allFireRasts[grep("Base",allFireRasts)][[1]] #index just makes it not a list
+  allFireRasts <- allFireRasts[grep("Base",allFireRasts,invert=TRUE)]
 
-
-
-# ------------- Resample rasters to have same extent and resolution-----------------#
-# Using base rasters resample response and predictor variables to same extent and resolution
-
-
-# Using base rasters resample response and predictor variables to same extent and resolution
-
-
-# Resample categorical and continuous variables differently
-for (i in 1:length(variables)) {
-  for (j in 1:length(base)){
-
-  variables_RS <- ifelse (sapply(as.list(variables), function(x) {grepl(paste(ctg_variables, sep = "", collapse = "|"), x)}),
-                        
-                          # I want to use base [fire] to resample variable [fire].... it doesnt work
-                        resample(variables[i[grepl(paste(FiresOfInterest[j], collapse = "|"), variables[i])]] == base[j], base[j], method = "ngb"),
-                        
-                        resample(variables[i[grepl(paste(FiresOfInterest[j], collapse = "|"), variables[i])]] == base[j], base[j], method = "bilinear")
-)
-
+  a <- list()
+  for(j in 1:length(allFireRasts)){
+    if(names(allFireRasts[[j]]) %in% CatRasts){
+      a[[j]] <- resample(allFireRasts[[j]], baseFireRast, method = "ngb")
+    } else {
+      a[[j]] <- resample(allFireRasts[[j]], baseFireRast, method = "bilinear")
+    }
   }
+  fireID <- str_extract(names(allFireRasts[1]),FiresOfInterest[i])
+  SimpleRastnames <- str_remove(str_remove(names(allFireRasts),FiresOfInterest[i]),"_")
+  names(a) <- SimpleRastnames
+  #stack the simplified names and assign to fire id rast name
+  assign(paste0(fireID,"rasts"), stack(a))
 }
+R21721rasts
 
-  
-  
 # dNBR
 dNBR <- resample(dNBR, base, method = "bilinear")
 # DOB
