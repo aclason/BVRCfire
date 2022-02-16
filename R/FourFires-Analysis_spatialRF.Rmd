@@ -1,0 +1,1274 @@
+---
+title: "FourFires-Analysis_spatialRF"
+author: "Ingrid Farnell"
+date: "14/02/2022"
+output: html_document
+---
+
+This script runs spatial random forest. 
+See https://blasbenito.github.io/spatialRF/ for detailed information
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#------------------------------ Load libraries---------------------------------#
+ls <- c("tidyverse", "data.table") # Data Management and Manipulation
+ls <- append(ls, c("raster")) # geo comp.
+ls <- append(ls, c("pdp", "spatialRF", "randomForestExplainer")) # analysis
+
+# Install if needed -- then load. 
+new.packages <- ls[!(ls %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+lapply(ls, library, character.only = TRUE)  # load the required packages
+rm(ls, new.packages)
+
+
+#------------------------------ 1. Load data ----------------------------------#
+SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
+#SpatialFilesPath <- getwd()
+# Set the fires of interest - all 2018 fires with openings
+FiresOfInterest <- c("G41607", "G51632", "R11498", "R11796","R11921","R21721")
+
+
+# Read in the rasters
+variable_list <- list.files(paste0(SpatialFilesPath, "/Inputs/Rasters/"),
+                            pattern =  paste(FiresOfInterest, sep = "", collapse = "|"), # only import the fires of interest
+                            recursive = TRUE,
+                            full.names = TRUE)
+variable_list <- grep("tif", variable_list, value=TRUE)
+# Drop OpenID, None and SitePrepped
+variable_list <- grep("OpenID|None|SitePrepped", variable_list, value = TRUE, invert = TRUE)
+# For now remove this one because the raster contains only NA's -- Alana to fix and then remove this line
+variable_list <- grep("R11498_SpotBurn", variable_list, value = TRUE, invert = TRUE)
+
+variables <- sapply(variable_list, raster)
+
+
+# Rename the variables 
+variable.name <- lapply(str_split(variable_list,"/"), function(x) grep(".tif", x, value=TRUE))
+variable.name <- str_split(variable.name, ".tif", simplify = TRUE)[,1]
+
+names(variables) <- variable.name
+
+#ID the names of the categorical rasters
+ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
+                   "OPENING_ID", "PileBurn", "PlantAge", "Prune", "Soil", "Spaced", 
+                   "SpotBurn", "WBurn")
+CatRasts <- grep(paste(ctg_variables,sep = "", collapse = "|"),variable.name,value=TRUE)
+
+```
+
+Prepare the data. Resample response and predictor variables to have the same extent and resolution (30 x 30 m) for each of the fires. 
+Categorical variables are resampled using nearest neighbourhood and continuous variables are resampled using bilinear resampling. 
+Predictor variables must meet the spatial random forest requirements:
+  1. Must be free of NA
+  2. Columns cannot have 0 variance
+  3. Columns must not yield NaN or Inf when scaled
+
+```{r, include = FALSE, warning = FALSE}
+# ------------------------------Prepare data-----------------------------------#
+#--------------------------2a. Resample rasters and stack----------------------#
+
+# Using base rasters resample response and predictor variables to same extent and resolution
+for(i in 1:length(FiresOfInterest)){
+  allFireRasts <- variables[grep(FiresOfInterest[i],variables)]
+  baseFireRast <- allFireRasts[grep("Base",allFireRasts)][[1]] #index just makes it not a list
+  allFireRasts <- allFireRasts[grep("Base",allFireRasts,invert=TRUE)]
+  
+  # Resample categorical and continuous variables differently
+  a <- list()
+  for(j in 1:length(allFireRasts)){
+    if(names(allFireRasts[[j]]) %in% CatRasts){
+      a[[j]] <- resample(allFireRasts[[j]], baseFireRast, method = "ngb")
+    } else {
+      a[[j]] <- resample(allFireRasts[[j]], baseFireRast, method = "bilinear")
+    }
+  }
+  fireID <- str_extract(names(allFireRasts[1]),FiresOfInterest[i])
+  SimpleRastnames <- str_remove(str_remove(names(allFireRasts),FiresOfInterest[i]),"_")
+  names(a) <- SimpleRastnames
+  #stack the simplified names and assign to fire id rast name
+  assign(paste0(fireID,"rasts"), stack(a))
+}
+
+
+#-----------------------------2b. Get sample points----------------------------#
+# Create index of raster stacks
+RastStacks <- list(G41607rasts, G51632rasts, R11498rasts, R11796rasts, R11921rasts, R21721rasts)
+
+for(i in 1:length(FiresOfInterest)){
+  allFireRasts <- variables[grep(FiresOfInterest[i],variables)]
+  dNBRFireRast <- allFireRasts[grep("dNBR",allFireRasts)][[1]] #use a raster (doesn't matter which one)
+  
+  # 270 m grid distance
+  b <- aggregate(dNBRFireRast, fact = 9, fun = mean)
+  points270 <- rasterToPoints(b, spatial = TRUE) # get sample grid: 1 point/270 m, spatial = TRUE so coordinates are attached
+  colnames(points270@data) <- "drop" # make sure to drop this later on(it's a place holder column for points)
+  
+  # Extract response and predictor values at sample points
+  SampledRaster <- raster::extract(RastStacks[[i]], points270, sp = TRUE)
+  # Convert to data frame
+  dat270 <- as.data.frame(SampledRaster) # hopefully xy = TRUE will attach coordinates, if not do sp = TRUE in above extract line
+  
+  # Drop rows that don't have an opening ID because we only want to include plantation openings
+  dat270 <- dat270 %>% filter(!is.na(OPENING_ID))
+  # Drop opening ID column
+  dat270 <- subset(dat270, select =-c(OPENING_ID, drop))
+  
+  # Meet spatial RF requirements
+  # 1. Must be free of NA
+  dat270 <- dat270[complete.cases(dat270), ] # remove NAs
+  
+  # 2. Columns cannot have 0 variance
+  RemoveZeroVar <- function(dat270) {
+    dat270[, !sapply(dat270, function(x) min(x) == max(x))]
+  }
+  dat270 <- RemoveZeroVar(dat270)
+  
+  # 3. Columns must not yield NaN or Inf when scaled
+  #sum(apply(scale(R11796dat270), 2, is.nan)) 
+  #sum(apply(scale(R11796dat270), 2, is.infinite))
+  # Find which columns are giving issue
+  #sapply(as.data.frame(scale(R21721_270)), function(x)any(is.nan(x)))
+  
+  # Move response (dNBR) to first column
+  dat270 <- dat270 %>% dplyr::select("dNBR", everything())
+  fireID <- str_extract(names(allFireRasts[1]),FiresOfInterest[i])
+  assign(paste0(fireID,"dat270"), dat270)
+  
+}
+
+```
+
+
+```{r, include = FALSE}
+# rm(allFireRasts, baseFireRast, dNBRFireRast, G41607rasts, G51632rasts, R11498rasts, R11796rasts, R11921rasts, R21721rasts, points270, SampledRaster, variables, a, b)
+
+
+```
+
+
+# G41607 Chutanli Lake
+```{r G41607, echo=FALSE}
+#----------------------------3a. Set up data-----------------------------------#
+# Names of response and predictor variables
+dependent.variable.name <- "dNBR"
+predictor.variable.names <- colnames(G41607dat270)[2:29]
+
+# Coordinates of the cases
+xy <- G41607dat270[, c("x", "y")]
+
+# Distance matrix
+dist <- pointDistance(G41607dat270[, c("x", "y")], lonlat = FALSE)
+distance.matrix <- dist
+
+# Distance thresholds (same units as distance matrix)
+distance.thresholds <- c(0, 270, 381, 540, 810, 1080, 1350)
+
+# Random seed for reproducibility
+random.seed <- 1
+
+
+#----------------------3b. Assess spatial autocorrelation----------------------#
+moran_preds <- spatialRF::plot_training_df_moran(
+  data = G41607dat270, 
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  fill.color = viridis::viridis(
+    100, 
+    option = "F", 
+    direction = -1),
+  point.color = "gray40"
+)
+moran_preds
+
+#-------------------3c. Reduce autocorrelation in predictors-------------------#
+# # Select preds preference order - the ones we want to keep
+# preference.order <- c("fwi", "isi", "bui", "dc")
+# 
+# # Assess autocorrelation & drop highly correlated
+# predictor.variable.names <- spatialRF::auto_cor(
+#   x = G41607dat270[, predictor.variable.names],
+#   cor.threshold = 0.75,
+#   preference.order = preference.order
+# ) %>%
+#   spatialRF::auto_vif(
+#     vif.threshold = 5,
+#     preference.order = preference.order
+#   )
+
+# ** This doesn't seem to be working**
+
+
+#------------------------4. Fit a non-spatial RF model-------------------------#
+model.non.spatial <- spatialRF::rf(
+  data = G41607dat270,
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  xy = xy, #not needed by rf, but other functions read it from the model
+  seed = random.seed,
+  verbose = FALSE
+)
+
+# Residuals
+spatialRF::plot_residuals_diagnostics(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+
+#----------------------------4a. Variable importance---------------------------#
+# Global variable importance
+spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Contribution of predictors to model transferability
+model.non.spatial <- spatialRF::rf_importance(
+  model = model.non.spatial
+)
+
+# Local variable importance
+local.importance <- spatialRF::get_importance_local(model.non.spatial)
+
+# Partial dependence plots
+spatialRF::plot_response_curves(
+  model.non.spatial,
+  quantiles = 0.5, # other predictors set to 0.5 of quantiles
+  ncol = 3
+)
+
+#----------------------------4b. Model performance-----------------------------#
+spatialRF::print_performance(model.non.spatial)
+
+
+#-------------------------4c. Spatial cross-validation-------------------------#
+model.non.spatial <- spatialRF::rf_evaluate(
+  model = model.non.spatial,
+  xy = xy,                  #data coordinates
+  repetitions = 30,         #number of spatial folds
+  training.fraction = 0.75, #training data fraction on each fold
+  metrics = "r.squared",
+  seed = random.seed,
+  verbose = FALSE
+)
+
+spatialRF::plot_evaluation(model.non.spatial)
+spatialRF::print_evaluation(model.non.spatial)
+
+
+#---------------------------5. Fit a spatial model-----------------------------#
+# Spatial autocorrelation of residuals on non-spatial model
+spatialRF::plot_moran(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Transform non-spatial model to a spatial model
+model.spatial <- spatialRF::rf_spatial(
+  model = model.non.spatial,
+  method = "mem.moran.sequential", #default method
+  verbose = FALSE,
+)
+spatial.predictors <- spatialRF::get_spatial_predictors(model.spatial)
+
+
+# Spatial autocorrelation of residuals on spatial model (what we are trying to reduce from the beginning)
+spatialRF::plot_moran(
+  model.spatial,
+  verbose = FALSE
+)
+
+
+# Variable importance
+p1 <- spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Non-spatial model")
+
+p2 <- spatialRF::plot_importance(
+  model.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Spatial model")
+
+p1 | p2
+
+# Top 10 spatial predictors
+head(model.spatial$importance$per.variable, n = 10)
+
+
+# #----------------------------------6. Tune the model---------------------------#
+# Don't do yet, see if spatial model works first
+# model.spatial <- rf_tuning(
+#   model = model.spatial,
+#   xy = xy,
+#   repetitions = 30,
+#   num.trees = c(500, 1000),
+#   mtry = seq(
+#     2,
+#     length(model.spatial$ranger.arguments$predictor.variable.names), #number of predictors
+#     by = 9),
+#   min.node.size = c(5, 15),
+#   seed = random.seed,
+#   verbose = FALSE
+# )
+# 
+# #-----------------------------7. Repeat a model execution----------------------#
+# model.spatial.repeat <- spatialRF::rf_repeat(
+#   model = model.spatial,
+#   repetitions = 30,
+#   seed = random.seed,
+#   verbose = FALSE
+# )
+# 
+# # Plot variable importance
+# spatialRF::plot_importance(
+#   model.spatial.repeat,
+#   verbose = FALSE
+# )
+# 
+# # Plot partial dependence curves 
+# spatialRF::plot_response_curves(
+#   model.spatial.repeat,
+#   quantiles = 0.5,
+#   ncol = 3
+# )
+# 
+# # Model performance
+# spatialRF::print_performance(model.spatial.repeat)
+
+```
+
+
+# G51632 Tezzeron
+```{r G51632, echo = FALSE}
+#----------------------------3a. Set up data-----------------------------------#
+
+# Names of response and predictor variables
+dependent.variable.name <- "dNBR"
+predictor.variable.names <- colnames(G51632dat270)[2:23]
+
+# Coordinates of the cases
+xy <- G51632dat270[, c("x", "y")]
+
+# Distance matrix
+dist <- pointDistance(G51632dat270[, c("x", "y")], lonlat = FALSE)
+distance.matrix <- dist
+
+# Distance thresholds (same units as distance matrix)
+distance.thresholds <- c(0, 270, 381, 540, 810, 1080, 1350)
+
+# Random seed for reproducibility
+random.seed <- 2
+
+
+#----------------------3b. Assess spatial autocorrelation----------------------#
+moran_preds <- spatialRF::plot_training_df_moran(
+  data = G51632dat270, 
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  fill.color = viridis::viridis(
+    100, 
+    option = "F", 
+    direction = -1),
+  point.color = "gray40"
+)
+moran_preds
+
+#-------------------3c. Reduce autocorrelation in predictors-------------------#
+# Select preds preference order - the ones we want to keep
+# preference.order <- c()
+# 
+# # Assess autocorrelation & drop highly correlated
+# predictor.variable.names <- spatialRF::auto_cor(
+#   x = G51632dat270[, predictor.variable.names],
+#   cor.threshold = 0.75,
+#   preference.order = preference.order
+# ) %>%
+#   spatialRF::auto_vif(
+#     vif.threshold = 5,
+#     preference.order = preference.order
+#   )
+
+
+
+#------------------------4. Fit a non-spatial RF model-------------------------#
+model.non.spatial <- spatialRF::rf(
+  data = G51632dat270,
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  xy = xy, #not needed by rf, but other functions read it from the model
+  seed = random.seed,
+  verbose = FALSE
+)
+
+# Residuals
+spatialRF::plot_residuals_diagnostics(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+
+#----------------------------4a. Variable importance---------------------------#
+# Global variable importance
+spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Contribution of predictors to model transferability
+model.non.spatial <- spatialRF::rf_importance(
+  model = model.non.spatial
+)
+
+# Local variable importance
+local.importance <- spatialRF::get_importance_local(model.non.spatial)
+
+# Partial dependence plots
+spatialRF::plot_response_curves(
+  model.non.spatial,
+  quantiles = 0.5, # other predictors set to 0.5 of quantiles
+  ncol = 3
+)
+
+#----------------------------4b. Model performance-----------------------------#
+spatialRF::print_performance(model.non.spatial)
+
+
+#-------------------------4c. Spatial cross-validation-------------------------#
+model.non.spatial <- spatialRF::rf_evaluate(
+  model = model.non.spatial,
+  xy = xy,                  #data coordinates
+  repetitions = 30,         #number of spatial folds
+  training.fraction = 0.75, #training data fraction on each fold
+  metrics = "r.squared",
+  seed = random.seed,
+  verbose = FALSE
+)
+
+spatialRF::plot_evaluation(model.non.spatial)
+spatialRF::print_evaluation(model.non.spatial)
+
+
+#---------------------------5. Fit a spatial model-----------------------------#
+# Spatial autocorrelation of residuals on non-spatial model
+spatialRF::plot_moran(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Transform non-spatial model to a spatial model
+model.spatial <- spatialRF::rf_spatial(
+  model = model.non.spatial,
+  method = "mem.moran.sequential", #default method
+  verbose = FALSE,
+  seed = random.seed
+)
+
+# Spatial autocorrelation of residuals on spatial model (what we are trying to reduce from the beginning)
+spatialRF::plot_moran(
+  model.spatial,
+  verbose = FALSE
+)
+
+# Variable importance
+p1 <- spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Non-spatial model")
+
+p2 <- spatialRF::plot_importance(
+  model.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Spatial model")
+
+p1 | p2
+
+# Top 10 spatial predictors
+head(model.spatial$importance$per.variable, n = 10)
+```
+
+
+# R11498 Shovel Lake
+Spot Burn was removed because the file is NA - need to fix, but for now I removed spot burn from raster stack
+```{r R11498, echo = FALSE}
+#----------------------------3a. Set up data-----------------------------------#
+
+# Names of response and predictor variables
+dependent.variable.name <- "dNBR"
+predictor.variable.names <- colnames(R11498dat270)[2:31]
+
+# Coordinates of the cases
+xy <- R11498dat270[, c("x", "y")]
+
+# Distance matrix
+dist <- pointDistance(R11498dat270[, c("x", "y")], lonlat = FALSE)
+distance.matrix <- dist
+
+# Distance thresholds (same units as distance matrix)
+distance.thresholds <- c(0, 270, 381, 540, 810, 1080, 1350)
+
+# Random seed for reproducibility
+random.seed <- 3
+
+
+#----------------------3b. Assess spatial autocorrelation----------------------#
+moran_preds <- spatialRF::plot_training_df_moran(
+  data = R11498dat270, 
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  fill.color = viridis::viridis(
+    100, 
+    option = "F", 
+    direction = -1),
+  point.color = "gray40"
+)
+moran_preds
+
+#-------------------3c. Reduce autocorrelation in predictors-------------------#
+# Select preds preference order - the ones we want to keep
+# preference.order <- c()
+# 
+# # Assess autocorrelation & drop highly correlated
+# predictor.variable.names <- spatialRF::auto_cor(
+#   x = R11498dat270[, predictor.variable.names],
+#   cor.threshold = 0.75,
+#   preference.order = preference.order
+# ) %>%
+#   spatialRF::auto_vif(
+#     vif.threshold = 5,
+#     preference.order = preference.order
+#   )
+
+
+
+#------------------------4. Fit a non-spatial RF model-------------------------#
+model.non.spatial <- spatialRF::rf(
+  data = R11498dat270,
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  xy = xy, #not needed by rf, but other functions read it from the model
+  seed = random.seed,
+  verbose = FALSE
+)
+
+# Residuals
+spatialRF::plot_residuals_diagnostics(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+
+#----------------------------4a. Variable importance---------------------------#
+# Global variable importance
+spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Contribution of predictors to model transferability
+model.non.spatial <- spatialRF::rf_importance(
+  model = model.non.spatial
+)
+
+# Local variable importance
+local.importance <- spatialRF::get_importance_local(model.non.spatial)
+
+# Partial dependence plots
+spatialRF::plot_response_curves(
+  model.non.spatial,
+  quantiles = 0.5, # other predictors set to 0.5 of quantiles
+  ncol = 3
+)
+
+#----------------------------4b. Model performance-----------------------------#
+spatialRF::print_performance(model.non.spatial)
+
+
+#-------------------------4c. Spatial cross-validation-------------------------#
+model.non.spatial <- spatialRF::rf_evaluate(
+  model = model.non.spatial,
+  xy = xy,                  #data coordinates
+  repetitions = 30,         #number of spatial folds
+  training.fraction = 0.75, #training data fraction on each fold
+  metrics = "r.squared",
+  seed = random.seed,
+  verbose = FALSE
+)
+
+spatialRF::plot_evaluation(model.non.spatial)
+spatialRF::print_evaluation(model.non.spatial)
+
+
+#---------------------------5. Fit a spatial model-----------------------------#
+# Spatial autocorrelation of residuals on non-spatial model
+spatialRF::plot_moran(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Transform non-spatial model to a spatial model
+model.spatial <- spatialRF::rf_spatial(
+  model = model.non.spatial,
+  method = "mem.moran.sequential", #default method
+  verbose = FALSE,
+  seed = random.seed
+)
+
+# Spatial autocorrelation of residuals on spatial model (what we are trying to reduce from the beginning)
+spatialRF::plot_moran(
+  model.spatial,
+  verbose = FALSE
+)
+
+# Variable importance
+p1 <- spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Non-spatial model")
+
+p2 <- spatialRF::plot_importance(
+  model.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Spatial model")
+
+p1 | p2
+
+# Top 10 spatial predictors
+head(model.spatial$importance$per.variable, n = 10)
+
+```
+
+
+# R11796 Verdun Mountain
+```{r R11796, echo = FALSE}
+#----------------------------3a. Set up data-----------------------------------#
+
+# Names of response and predictor variables
+dependent.variable.name <- "dNBR"
+predictor.variable.names <- colnames(R11796dat270)[2:32]
+
+# Coordinates of the cases
+xy <- R11796dat270[, c("x", "y")]
+
+# Distance matrix
+dist <- pointDistance(R11796dat270[, c("x", "y")], lonlat = FALSE)
+distance.matrix <- dist
+
+# Distance thresholds (same units as distance matrix)
+distance.thresholds <- c(0, 270, 381, 540, 810, 1080, 1350)
+
+# Random seed for reproducibility
+random.seed <- 4
+
+
+#----------------------3b. Assess spatial autocorrelation----------------------#
+moran_preds <- spatialRF::plot_training_df_moran(
+  data = R11796dat270, 
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  fill.color = viridis::viridis(
+    100, 
+    option = "F", 
+    direction = -1),
+  point.color = "gray40"
+)
+moran_preds
+
+#-------------------3c. Reduce autocorrelation in predictors-------------------#
+# # Select preds preference order - the ones we want to keep
+# preference.order <- c()
+# 
+# # Assess autocorrelation & drop highly correlated
+# predictor.variable.names <- spatialRF::auto_cor(
+#   x = R11796dat270[, predictor.variable.names],
+#   cor.threshold = 0.75,
+#   preference.order = preference.order
+# ) %>%
+#   spatialRF::auto_vif(
+#     vif.threshold = 5,
+#     preference.order = preference.order
+#   )
+# 
+
+
+#------------------------4. Fit a non-spatial RF model-------------------------#
+model.non.spatial <- spatialRF::rf(
+  data = R11796dat270,
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  xy = xy, #not needed by rf, but other functions read it from the model
+  seed = random.seed,
+  verbose = FALSE
+)
+
+# Residuals
+spatialRF::plot_residuals_diagnostics(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+
+#----------------------------4a. Variable importance---------------------------#
+# Global variable importance
+spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Contribution of predictors to model transferability
+model.non.spatial <- spatialRF::rf_importance(
+  model = model.non.spatial
+)
+
+# Local variable importance
+local.importance <- spatialRF::get_importance_local(model.non.spatial)
+
+# Partial dependence plots
+spatialRF::plot_response_curves(
+  model.non.spatial,
+  quantiles = 0.5, # other predictors set to 0.5 of quantiles
+  ncol = 3
+)
+
+#----------------------------4b. Model performance-----------------------------#
+spatialRF::print_performance(model.non.spatial)
+
+
+#-------------------------4c. Spatial cross-validation-------------------------#
+model.non.spatial <- spatialRF::rf_evaluate(
+  model = model.non.spatial,
+  xy = xy,                  #data coordinates
+  repetitions = 30,         #number of spatial folds
+  training.fraction = 0.75, #training data fraction on each fold
+  metrics = "r.squared",
+  seed = random.seed,
+  verbose = FALSE
+)
+
+spatialRF::plot_evaluation(model.non.spatial)
+spatialRF::print_evaluation(model.non.spatial)
+
+
+#---------------------------5. Fit a spatial model-----------------------------#
+# Spatial autocorrelation of residuals on non-spatial model
+spatialRF::plot_moran(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Transform non-spatial model to a spatial model
+model.spatial <- spatialRF::rf_spatial(
+  model = model.non.spatial,
+  method = "mem.moran.sequential", #default method
+  verbose = FALSE,
+  seed = random.seed
+)
+
+# Spatial autocorrelation of residuals on spatial model (what we are trying to reduce from the beginning)
+spatialRF::plot_moran(
+  model.spatial,
+  verbose = FALSE
+)
+
+# Variable importance
+p1 <- spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Non-spatial model")
+
+p2 <- spatialRF::plot_importance(
+  model.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Spatial model")
+
+p1 | p2
+
+# Top 10 spatial predictors
+head(model.spatial$importance$per.variable, n = 10)
+
+```
+
+
+# R11921 Island Lake
+```{r R11921, echo = FALSE}
+#----------------------------3a. Set up data-----------------------------------#
+
+# Names of response and predictor variables
+dependent.variable.name <- "dNBR"
+predictor.variable.names <- colnames(R11921dat270)[2:30]
+
+# Coordinates of the cases
+xy <- R11921dat270[, c("x", "y")]
+
+# Distance matrix
+dist <- pointDistance(R11921dat270[, c("x", "y")], lonlat = FALSE)
+distance.matrix <- dist
+
+# Distance thresholds (same units as distance matrix)
+distance.thresholds <- c(0, 270, 381, 540, 810, 1080, 1350)
+
+# Random seed for reproducibility
+random.seed <- 5
+
+
+#----------------------3b. Assess spatial autocorrelation----------------------#
+moran_preds <- spatialRF::plot_training_df_moran(
+  data = R11921dat270, 
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  fill.color = viridis::viridis(
+    100, 
+    option = "F", 
+    direction = -1),
+  point.color = "gray40"
+)
+moran_preds
+
+#-------------------3c. Reduce autocorrelation in predictors-------------------#
+# # Select preds preference order - the ones we want to keep
+# preference.order <- c()
+# 
+# # Assess autocorrelation & drop highly correlated
+# predictor.variable.names <- spatialRF::auto_cor(
+#   x = R11921dat270[, predictor.variable.names],
+#   cor.threshold = 0.75,
+#   preference.order = preference.order
+# ) %>%
+#   spatialRF::auto_vif(
+#     vif.threshold = 5,
+#     preference.order = preference.order
+#   )
+# 
+# 
+
+#------------------------4. Fit a non-spatial RF model-------------------------#
+model.non.spatial <- spatialRF::rf(
+  data = R11921dat270,
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  xy = xy, #not needed by rf, but other functions read it from the model
+  seed = random.seed,
+  verbose = FALSE
+)
+
+# Residuals
+spatialRF::plot_residuals_diagnostics(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+
+#----------------------------4a. Variable importance---------------------------#
+# Global variable importance
+spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Contribution of predictors to model transferability
+model.non.spatial <- spatialRF::rf_importance(
+  model = model.non.spatial
+)
+
+# Local variable importance
+local.importance <- spatialRF::get_importance_local(model.non.spatial)
+
+# Partial dependence plots
+spatialRF::plot_response_curves(
+  model.non.spatial,
+  quantiles = 0.5, # other predictors set to 0.5 of quantiles
+  ncol = 3
+)
+
+#----------------------------4b. Model performance-----------------------------#
+spatialRF::print_performance(model.non.spatial)
+
+
+#-------------------------4c. Spatial cross-validation-------------------------#
+model.non.spatial <- spatialRF::rf_evaluate(
+  model = model.non.spatial,
+  xy = xy,                  #data coordinates
+  repetitions = 30,         #number of spatial folds
+  training.fraction = 0.75, #training data fraction on each fold
+  metrics = "r.squared",
+  seed = random.seed,
+  verbose = FALSE
+)
+
+spatialRF::plot_evaluation(model.non.spatial)
+spatialRF::print_evaluation(model.non.spatial)
+
+
+#---------------------------5. Fit a spatial model-----------------------------#
+# Spatial autocorrelation of residuals on non-spatial model
+spatialRF::plot_moran(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Transform non-spatial model to a spatial model
+model.spatial <- spatialRF::rf_spatial(
+  model = model.non.spatial,
+  method = "mem.moran.sequential", #default method
+  verbose = FALSE,
+  seed = random.seed
+)
+
+# Spatial autocorrelation of residuals on spatial model (what we are trying to reduce from the beginning)
+spatialRF::plot_moran(
+  model.spatial,
+  verbose = FALSE
+)
+
+# Variable importance
+p1 <- spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Non-spatial model")
+
+p2 <- spatialRF::plot_importance(
+  model.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Spatial model")
+
+p1 | p2
+
+# Top 10 spatial predictors
+head(model.spatial$importance$per.variable, n = 10)
+```
+
+
+# R21721 Nadina Lake
+```{r R21721, echo = FALSE}
+#----------------------------3a. Set up data-----------------------------------#
+
+# Names of response and predictor variables
+dependent.variable.name <- "dNBR"
+predictor.variable.names <- colnames(R21721dat270)[2:33]
+
+# Coordinates of the cases
+xy <- R21721dat270[, c("x", "y")]
+
+# Distance matrix
+dist <- pointDistance(R21721dat270[, c("x", "y")], lonlat = FALSE)
+distance.matrix <- dist
+
+# Distance thresholds (same units as distance matrix)
+distance.thresholds <- c(0, 270, 381, 540, 810, 1080, 1350)
+
+# Random seed for reproducibility
+random.seed <- 6
+
+
+#----------------------3b. Assess spatial autocorrelation----------------------#
+moran_preds <- spatialRF::plot_training_df_moran(
+  data = R21721dat270, 
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  fill.color = viridis::viridis(
+    100, 
+    option = "F", 
+    direction = -1),
+  point.color = "gray40"
+)
+moran_preds
+
+#-------------------3c. Reduce autocorrelation in predictors-------------------#
+# # Select preds preference order - the ones we want to keep
+# preference.order <- c()
+# 
+# # Assess autocorrelation & drop highly correlated
+# predictor.variable.names <- spatialRF::auto_cor(
+#   x = R21721dat270[, predictor.variable.names],
+#   cor.threshold = 0.75,
+#   preference.order = preference.order
+# ) %>%
+#   spatialRF::auto_vif(
+#     vif.threshold = 5,
+#     preference.order = preference.order
+#   )
+# 
+
+
+#------------------------4. Fit a non-spatial RF model-------------------------#
+model.non.spatial <- spatialRF::rf(
+  data = R21721dat270,
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  xy = xy, #not needed by rf, but other functions read it from the model
+  seed = random.seed,
+  verbose = FALSE
+)
+
+# Residuals
+spatialRF::plot_residuals_diagnostics(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+
+#----------------------------4a. Variable importance---------------------------#
+# Global variable importance
+spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Contribution of predictors to model transferability
+model.non.spatial <- spatialRF::rf_importance(
+  model = model.non.spatial
+)
+
+# Local variable importance
+local.importance <- spatialRF::get_importance_local(model.non.spatial)
+
+# Partial dependence plots
+spatialRF::plot_response_curves(
+  model.non.spatial,
+  quantiles = 0.5, # other predictors set to 0.5 of quantiles
+  ncol = 3
+)
+
+#----------------------------4b. Model performance-----------------------------#
+spatialRF::print_performance(model.non.spatial)
+
+
+#-------------------------4c. Spatial cross-validation-------------------------#
+model.non.spatial <- spatialRF::rf_evaluate(
+  model = model.non.spatial,
+  xy = xy,                  #data coordinates
+  repetitions = 30,         #number of spatial folds
+  training.fraction = 0.75, #training data fraction on each fold
+  metrics = "r.squared",
+  seed = random.seed,
+  verbose = FALSE
+)
+
+spatialRF::plot_evaluation(model.non.spatial)
+spatialRF::print_evaluation(model.non.spatial)
+
+
+#---------------------------5. Fit a spatial model-----------------------------#
+# Spatial autocorrelation of residuals on non-spatial model
+spatialRF::plot_moran(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Transform non-spatial model to a spatial model
+model.spatial <- spatialRF::rf_spatial(
+  model = model.non.spatial,
+  method = "mem.moran.sequential", #default method
+  verbose = FALSE,
+  seed = random.seed
+)
+
+# Spatial autocorrelation of residuals on spatial model (what we are trying to reduce from the beginning)
+spatialRF::plot_moran(
+  model.spatial,
+  verbose = FALSE
+)
+
+# Variable importance
+p1 <- spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Non-spatial model")
+
+p2 <- spatialRF::plot_importance(
+  model.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Spatial model")
+
+p1 | p2
+
+# Top 10 spatial predictors
+head(model.spatial$importance$per.variable, n = 10)
+```
+
+
+Entire fire study area (all fires)
+# R21721 Nadina Lake
+```{r ALL, echo = FALSE}
+#----------------------------3a. Set up data-----------------------------------#
+# Combine datasets
+ALLdat270<- list(G41607dat270, G51632dat270, R11498dat270, R11796dat270, R11921dat270, R21721dat270) %>%
+  reduce(full_join)
+
+# If NA make 0 (check first I want to do this)
+ALLdat270[is.na(ALLdat270)] <- 0
+
+# Names of response and predictor variables
+dependent.variable.name <- "dNBR"
+predictor.variable.names <- colnames(ALLdat270)[c(2:29, 32:35)]
+
+# Coordinates of the cases
+xy <- ALLdat270[, c("x", "y")]
+
+# Distance matrix
+dist <- pointDistance(ALLdat270[, c("x", "y")], lonlat = FALSE)
+distance.matrix <- dist
+
+# Distance thresholds (same units as distance matrix)
+distance.thresholds <- c(0, 270, 381, 540, 810, 1080, 1350)
+
+# Random seed for reproducibility
+random.seed <- 1
+
+
+#----------------------3b. Assess spatial autocorrelation----------------------#
+moran_preds <- spatialRF::plot_training_df_moran(
+  data = ALLdat270, 
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  fill.color = viridis::viridis(
+    100, 
+    option = "F", 
+    direction = -1),
+  point.color = "gray40"
+)
+moran_preds
+
+#-------------------3c. Reduce autocorrelation in predictors-------------------#
+# # Select preds preference order - the ones we want to keep
+# preference.order <- c()
+# 
+# # Assess autocorrelation & drop highly correlated
+# predictor.variable.names <- spatialRF::auto_cor(
+#   x = ALLdat270[, predictor.variable.names],
+#   cor.threshold = 0.75,
+#   preference.order = preference.order
+# ) %>%
+#   spatialRF::auto_vif(
+#     vif.threshold = 5,
+#     preference.order = preference.order
+#   )
+# 
+
+
+#------------------------4. Fit a non-spatial RF model-------------------------#
+model.non.spatial <- spatialRF::rf(
+  data = ALLdat270,
+  dependent.variable.name = dependent.variable.name,
+  predictor.variable.names = predictor.variable.names,
+  distance.matrix = distance.matrix,
+  distance.thresholds = distance.thresholds,
+  xy = xy, #not needed by rf, but other functions read it from the model
+  seed = random.seed,
+  verbose = FALSE
+)
+
+# Residuals
+spatialRF::plot_residuals_diagnostics(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+
+#----------------------------4a. Variable importance---------------------------#
+# Global variable importance
+spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Contribution of predictors to model transferability
+model.non.spatial <- spatialRF::rf_importance(
+  model = model.non.spatial
+)
+
+# Local variable importance
+local.importance <- spatialRF::get_importance_local(model.non.spatial)
+
+# Partial dependence plots
+spatialRF::plot_response_curves(
+  model.non.spatial,
+  quantiles = 0.5, # other predictors set to 0.5 of quantiles
+  ncol = 3
+)
+
+#----------------------------4b. Model performance-----------------------------#
+spatialRF::print_performance(model.non.spatial)
+
+
+#-------------------------4c. Spatial cross-validation-------------------------#
+model.non.spatial <- spatialRF::rf_evaluate(
+  model = model.non.spatial,
+  xy = xy,                  #data coordinates
+  repetitions = 30,         #number of spatial folds
+  training.fraction = 0.75, #training data fraction on each fold
+  metrics = "r.squared",
+  seed = random.seed,
+  verbose = FALSE
+)
+
+spatialRF::plot_evaluation(model.non.spatial)
+spatialRF::print_evaluation(model.non.spatial)
+
+
+#---------------------------5. Fit a spatial model-----------------------------#
+# Spatial autocorrelation of residuals on non-spatial model
+spatialRF::plot_moran(
+  model.non.spatial,
+  verbose = FALSE
+)
+
+# Transform non-spatial model to a spatial model
+model.spatial <- spatialRF::rf_spatial(
+  model = model.non.spatial,
+  method = "mem.moran.sequential", #default method
+  verbose = FALSE,
+  seed = random.seed
+)
+
+# Spatial autocorrelation of residuals on spatial model (what we are trying to reduce from the beginning)
+spatialRF::plot_moran(
+  model.spatial,
+  verbose = FALSE
+)
+
+# Variable importance
+p1 <- spatialRF::plot_importance(
+  model.non.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Non-spatial model")
+
+p2 <- spatialRF::plot_importance(
+  model.spatial,
+  verbose = FALSE) +
+  ggplot2::ggtitle("Spatial model")
+
+p1 | p2
+
+# Top 10 spatial predictors
+head(model.spatial$importance$per.variable, n = 10)
+```
+
