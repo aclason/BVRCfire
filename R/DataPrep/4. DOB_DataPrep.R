@@ -2,9 +2,21 @@
 # Ingrid Farnell
 # Jan 21, 2022
 
+library(raster)
+
+FiresOfInterest <- c("C10784", "C10970", "C11837", "C11937", "C12594", "C20729", "C20735", "C50647",
+               "C50744","G41607", "G51632", "K20637", "R11498", "R11796", "R11921", "R12068", 
+               "R12315", "R21721", "VA1787", "VA1964")
+for(i in 1:length(FiresOfInterest)){
+  r <- raster(paste0("./Inputs/Rasters/DOB/",FiresOfInterest[i],"/dob.tif"))
+  writeRaster(r,paste0("./Inputs/Rasters/DOB/dob_",FiresOfInterest[i],"n83.tif"))
+}
+
+
+
+##### I think we can delete all this ######
+
 # This script rounds the DOB rasters to a whole number. 
-
-
 #--------------- Load libraries----------------#
 ls <- c("tidyverse", "data.table") # Data Management and Manipulation
 ls <- append(ls, c("raster")) # geo comp.

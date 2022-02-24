@@ -43,3 +43,9 @@ Inputs/CBI.csv
 
 Inputs/Fireweather/FireWeather.zip
 .Rproj.user
+
+*.png
+
+Inputs/Rasters/DOB/R21721/dob.tif.aux.xml
+
+*.cpg
