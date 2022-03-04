@@ -1,8 +1,11 @@
 # DOB data prep
-# Ingrid Farnell
+# Ingrid Farnell and Alana Clason
 # Jan 21, 2022
 
 library(raster)
+
+# This script copies the dob tiffs created by Sean Parkes code (3. DOB_interpolation.R), renames into the main
+#folder in order to be re-projected below.
 
 FiresOfInterest <- c("C10784", "C10970", "C11837", "C11937", "C12594", "C20729", "C20735", "C50647",
                "C50744","G41607", "G51632", "K20637", "R11498", "R11796", "R11921", "R12068", 

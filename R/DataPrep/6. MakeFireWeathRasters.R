@@ -71,7 +71,7 @@ sts_Mns <- fwi_dailies[,.(MnMaxTemp=mean(maxTemp),MnMinRH=mean(minRH),MnMaxWind=
                        by=c("FireID","dateNoHr","jDay")]
 ggplot()+
   geom_point(data = fwi_dailies[FireID=="R11498"], aes(x=jDay,y=dc))+
-  geom_point(data = sts_Mns[FireID=="R11498"], aes(x=jDay,y=MnDC, colour="red"))
+  geom_point(data = sts_Mns[FireID=="R11498"], aes(x=jDay,y=MnDC, colour="red"))+
   facet_wrap(~FireID)
 #mean chutlanli is the same as raw data because there's only one weather station
 ggplot()+
@@ -80,7 +80,7 @@ ggplot()+
   
 for(ii in 1:length(FiresOfInterest)){
   #read in DOB rasters
-  dob <- raster(paste0("./Inputs/Rasters/DOB/DOBrounded_",FiresOfInterest[ii],".tif"))
+  dob <- raster(paste0("./Inputs/Rasters/DOB/dob_",FiresOfInterest[ii],".tif"))
   DaysOfInterest <- seq(min(na.omit(dob[])), max(na.omit(dob[])))
   bui_rast <- dob
   isi_rast <- dob

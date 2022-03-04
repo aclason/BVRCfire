@@ -1,6 +1,6 @@
 ---
 title: "FourFires-Analysis_spatialRF"
-author: "Ingrid Farnell"
+author: "Ingrid Farnell and Alana Clason"
 date: "14/02/2022"
 output: html_document
 ---
@@ -22,10 +22,13 @@ if(length(new.packages)) install.packages(new.packages)
 lapply(ls, library, character.only = TRUE)  # load the required packages
 rm(ls, new.packages)
 
-
+library(raster)
+library(tidyverse)
+library(data.table)
+library(stringr)
 #------------------------------ 1. Load data ----------------------------------#
-SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
-#SpatialFilesPath <- getwd()
+#SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
+SpatialFilesPath <- getwd()
 # Set the fires of interest - all 2018 fires with openings
 FiresOfInterest <- c("G41607", "G51632", "R11498", "R11796","R11921","R21721")
 
@@ -37,7 +40,7 @@ variable_list <- list.files(paste0(SpatialFilesPath, "/Inputs/Rasters/"),
                             full.names = TRUE)
 variable_list <- grep("tif", variable_list, value=TRUE)
 # Drop OpenID, None and SitePrepped
-variable_list <- grep("OpenID|None|SitePrepped", variable_list, value = TRUE, invert = TRUE)
+variable_list <- grep("OpenID|None|SitePrepped|n83", variable_list, value = TRUE, invert = TRUE)
 # For now remove this one because the raster contains only NA's -- Alana to fix and then remove this line
 variable_list <- grep("R11498_SpotBurn", variable_list, value = TRUE, invert = TRUE)
 
@@ -137,6 +140,53 @@ for(i in 1:length(FiresOfInterest)){
   assign(paste0(fireID,"dat270"), dat270)
   
 }
+
+
+for(i in 1:length(FiresOfInterest)){
+
+  allFireRasts <- variables[grep(FiresOfInterest[i],variables)]
+  dNBRFireRast <- allFireRasts[grep("dNBR",allFireRasts)][[1]] #use a raster (doesn't matter which one)
+  
+  for(j in 1:length(SampleDists)){
+    if(SampleDists[j] =="270")
+  # 270 m grid distance
+  b <- aggregate(dNBRFireRast, fact = 9, fun = mean)
+  points270 <- rasterToPoints(b, spatial = TRUE) # get sample grid: 1 point/270 m, spatial = TRUE so coordinates are attached
+  colnames(points270@data) <- "drop" # make sure to drop this later on(it's a place holder column for points)
+  
+  # Extract response and predictor values at sample points
+  SampledRaster <- raster::extract(RastStacks[[i]], points270, sp = TRUE)
+  # Convert to data frame
+  dat270 <- as.data.frame(SampledRaster) # hopefully xy = TRUE will attach coordinates, if not do sp = TRUE in above extract line
+  
+  # Drop rows that don't have an opening ID because we only want to include plantation openings
+  dat270 <- dat270 %>% filter(!is.na(OPENING_ID))
+  # Drop opening ID column
+  dat270 <- subset(dat270, select =-c(OPENING_ID, drop))
+  
+  # Meet spatial RF requirements
+  # 1. Must be free of NA
+  dat270 <- dat270[complete.cases(dat270), ] # remove NAs
+  
+  # 2. Columns cannot have 0 variance
+  RemoveZeroVar <- function(dat270) {
+    dat270[, !sapply(dat270, function(x) min(x) == max(x))]
+  }
+  dat270 <- RemoveZeroVar(dat270)
+  
+  # 3. Columns must not yield NaN or Inf when scaled
+  #sum(apply(scale(R11796dat270), 2, is.nan)) 
+  #sum(apply(scale(R11796dat270), 2, is.infinite))
+  # Find which columns are giving issue
+  #sapply(as.data.frame(scale(R21721_270)), function(x)any(is.nan(x)))
+  
+  # Move response (dNBR) to first column
+  dat270 <- dat270 %>% dplyr::select("dNBR", everything())
+  fireID <- str_extract(names(allFireRasts[1]),FiresOfInterest[i])
+  assign(paste0(fireID,"dat270"), dat270)
+  }
+}
+
 
 ```
 

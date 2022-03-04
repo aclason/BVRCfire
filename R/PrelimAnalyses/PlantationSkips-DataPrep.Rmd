@@ -3,6 +3,8 @@ title: "PlantationSkils_DataPrep"
 author: "A. Clason"
 date: "March 31, 2021"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
