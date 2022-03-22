@@ -207,7 +207,6 @@ Nadina_sf = sf::st_as_sf(Nadina, coords = c("x", "y"))
 # Chutanli
 Train a ranger model then do model interpretation
 ```{r Chutanli, echo=FALSE}
-rm(learner, rr, rrFlt)
 
 #--- Step 1: Define a task
 task = TaskRegrST$new("Chutanli",
@@ -225,9 +224,12 @@ learner = lrn("regr.ranger",
 
 
 #--- Step 3: Model validation
+# lists different performance measures https://mlr3.mlr-org.com/reference/mlr_measures.html 
 resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
 rr = resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rr$aggregate(msr("regr.rsq")) # by fold R2 (avg. perforamance over all k fold from CV)
+rr$aggregate(msr("regr.rsq")) # fold R2 (avg. perforamance over all k fold from CV)
+rr$aggregate(msr("regr.mse")) # mean square error
+rr$aggregate(msr("oob_error")) # out-of-bag-error
 rr$prediction()$score(msr("regr.rsq")) # global R2 (R2 over every data point predicted during CV)
 # fold R2 = 0.19
 # global R2 = 0.24
@@ -276,7 +278,7 @@ learner$model # R2 on fully trained model
 #R2oob = 0.34
 
 #--- Step 8: Model interpretation
-#--- IML
+#--- using IML package
 data = as.data.frame(Chutanli_sf) # IML package can't handle sf objects
 x = data[which(names(data) != c("dNBR","geometry"))] 
 model = Predictor$new(learner, data = x, y = data$dNBR)
@@ -284,7 +286,11 @@ model = Predictor$new(learner, data = x, y = data$dNBR)
 # Feature Effects - ale plots
 #      computes the effects for all given features on the model prediction
 #      ale plots > pdp plots because they still work when features are correlated
-effect = FeatureEffects$new(model, method = "ale") # accumulated local effects
+effect = FeatureEffects$new(model, method = "ale") # accumulated local effects 
+plot(effect)
+
+# or look at partial dependance plots
+effect = FeatureEffects$new(model, method = "pdp") # partial dependance plots
 plot(effect)
 
 # Shapley
@@ -296,12 +302,13 @@ plot(shapley) # phi gives increase or decrease in probability given the values o
 
 # Feature Imp
 #       Level of importance of the features
+# I input the below variables before I did the variable permutation filter - so will likely have to change these as some of these variables were removed from the task in step 5
 num_features = c("DOBrounded", "PlantAge", "BASAL_AREA", "CROWN_CLOS", "PineCov", "SpruceCov", "BroadBurn", "Brushed")
 effect.imp = FeatureImp$new(model, loss = "mae") # mean absolute error
 effect.imp$plot(features = num_features)
 
 # Independent test data
-train_set = sample(task$nrow, 0.8 * task$nrow)
+train_set = sample(task$nrow, 0.8 * task$nrow) # train on 80% of data
 test_set = setdiff(seq_len(task$nrow), train_set)
 learner$train(task, row_ids = train_set)
 prediction = learner$predict(task, row_ids = test_set)
@@ -330,6 +337,7 @@ plot(effect, features = num_features)
 
 
 #--- DALEX
+# similar to IML package
 #     Methods for analyzing the model at the level of a single prediction and the global level
 model_exp = explain_mlr3(learner,
                          data = x, # provide data without y 
