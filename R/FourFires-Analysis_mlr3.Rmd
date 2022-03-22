@@ -3,6 +3,8 @@ title: "FourFires-Analysis_mlr"
 author: "Ingrid Farnell"
 date: "25/02/2022"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 This script runs ranger using mlr3 package
@@ -38,8 +40,8 @@ rm(ls, new.packages)
 
 
 #------------------------------ 1. Load data ----------------------------------#
-SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
-#SpatialFilesPath <- getwd()
+#SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
+SpatialFilesPath <- getwd()
 # Set the fires of interest - all 2018 fires with openings
 FiresOfInterest <- c("G41607", "G51632", "R11498", "R11796","R11921","R21721")
 
@@ -51,7 +53,7 @@ variable_list <- list.files(paste0(SpatialFilesPath, "/Inputs/Rasters/"),
                             full.names = TRUE)
 variable_list <- grep("tif", variable_list, value=TRUE)
 # Drop OpenID, None and SitePrepped
-variable_list <- grep("OpenID|None|SitePrepped", variable_list, value = TRUE, invert = TRUE)
+variable_list <- grep("OpenID|None|SitePrepped|n83", variable_list, value = TRUE, invert = TRUE)
 # For now remove this one because the raster contains only NA's -- Alana to fix and then remove this line
 variable_list <- grep("R11498_SpotBurn", variable_list, value = TRUE, invert = TRUE)
 
@@ -94,9 +96,9 @@ for(i in 1:length(FiresOfInterest)){
   a <- list()
   for(j in 1:length(allFireRasts)){
     if(names(allFireRasts[[j]]) %in% CatRasts){
-      a[[j]] <- resample(allFireRasts[[j]], baseFireRast, method = "ngb")
+      a[[j]] <- raster::resample(allFireRasts[[j]], baseFireRast, method = "ngb")
     } else {
-      a[[j]] <- resample(allFireRasts[[j]], baseFireRast, method = "bilinear")
+      a[[j]] <- raster::resample(allFireRasts[[j]], baseFireRast, method = "bilinear")
     }
   }
   fireID <- str_extract(names(allFireRasts[1]),FiresOfInterest[i])
