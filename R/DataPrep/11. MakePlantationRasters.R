@@ -5,11 +5,11 @@
 # to create rasters for each fire of interest with plantation
 
 library(data.table)
-library(dplyr)
 library(plyr)
 library(raster)
 library(fasterize)
 library(sf)
+library(dplyr)
 library(stringr)
 library(readr)
 
@@ -58,8 +58,9 @@ for(ix in 1:length(FiresOfInterest)){
   FireRast <- fasterize(Fire,PlotSize, field="FirePerim", background=0)
   plot(FireRast)
   ####### RESULTS ########
-  Fire_Results <- Results_sel %>% 
-    dplyr::filter(st_contains(Fire, ., sparse = FALSE)) #the fire had to fully contain the opening
+  Fire_Results <- Results_sel %>%
+    #filter doesn't work anymore without explicitly passing a vector
+    dplyr::filter(st_contains(Fire, ., sparse = FALSE)[1,]) #the fire had to fully contain the opening
   #Define plantations
   Fire_Results_dat <- as.data.table(Fire_Results)
   #1. To be a plantation, there had to be harvest
@@ -281,14 +282,16 @@ for(ix in 1:length(FiresOfInterest)){
   #figure out which treatments are available in a given fire:
   RESULTS_rasts_avail <- c(colnames(Plant_SP)[colnames(Plant_SP) %in% RESULTS_rasts],"geometry")
   Plant_SP_sf <- st_as_sf(Plant_SP[,..RESULTS_rasts_avail])
-  rastToMake <- RESULTS_rasts_avail[RESULTS_rasts_avail != "geometry"]
+  Plant_SP_sf <- st_make_valid(Plant_SP_sf)
+  write_sf(Plant_SP_sf, paste0("./Inputs/Shapefiles/",Fire$FIRE_NUMBE,"_Plantations.shp"))
+  #rastToMake <- RESULTS_rasts_avail[RESULTS_rasts_avail != "geometry"]
   #plot(fasterize(Plant_SP_sf,FireRast, field=RESULTS_rasts[1]))
   #write out the rasters
-  for(iix in 1:length(rastToMake)){
-    writeRaster(fasterize(Plant_SP_sf,FireRast, field=rastToMake[iix]),
-                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_",rastToMake[iix],".tif"),
-                overwrite=TRUE)
-  }
+  #for(iix in 1:length(rastToMake)){
+   # writeRaster(fasterize(Plant_SP_sf,FireRast, field=rastToMake[iix]),
+    #            paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_",rastToMake[iix],".tif"),
+     #           overwrite=TRUE)
+  #}
 }
 
 

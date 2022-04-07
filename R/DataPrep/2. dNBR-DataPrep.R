@@ -40,6 +40,55 @@ for(j in 1:length(dNBR_list)){
                                            FireListFromSam[j],".tif"),overwrite=TRUE)
 }
 
+#------------------------------ Load libraries---------------------------------#
+ls <- c("tidyverse", "data.table", "magrittr") # Data Management and Manipulation
+ls <- append(ls, c("raster")) # geo comp.,
+ls <- append(ls, c("pdp", "mlr3", "mlr3spatiotempcv", "mlr3verse")) # analysis
+ls <- append(ls, c("iml", "patchwork", "DALEX", "DALEXtra")) # model interpretation/visualization
+
+# Install if needed -- then load. 
+new.packages <- ls[!(ls %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+lapply(ls, library, character.only = TRUE)  # load the required packages
+rm(ls, new.packages)
 
 
+#------------------------------ 1. Load data ----------------------------------#
+#SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
+SpatialFilesPath <- getwd()
+# Set the fires of interest - all 2018 fires with openings
+FiresOfInterest <- c("G41607", "G51632", "R11498", "R11796","R11921","R21721")
+StudyFirePerims <- read_sf("./Inputs/Shapefiles/Study_fire_perimeters.shp")
+#over the first value, and under the second = 1
+m <- c(-Inf, 99, 1,  100, 269, 2,  270, 659, 3, 660,Inf,4)
+rclmat <- cbind(from = c(-Inf, 99, 269, 659), to = c(99, 269, 659, Inf), becomes = c(1,2,3,4))
+rclmat <- matrix(m, ncol=3, byrow=TRUE)
+
+# Read in the rasters
+variable_list <- list.files(paste0(SpatialFilesPath, "/Inputs/Rasters/dNBR/"),
+                            pattern =  paste(FiresOfInterest, sep = "", collapse = "|"), # only import the fires of interest
+                            recursive = TRUE,
+                            full.names = TRUE)
+variable_list <- grep("tif", variable_list, value=TRUE)
+variables <- sapply(variable_list, raster)
+
+# Rename the variables 
+variable.name <- lapply(str_split(variable_list,"/"), function(x) grep(".tif", x, value=TRUE))
+variable.name <- str_split(variable.name, ".tif", simplify = TRUE)[,1]
+
+names(variables) <- variable.name
+
+for(i in 1:length(FiresOfInterest)){
+  baseFireRast <- raster(paste0(SpatialFilesPath, "/Inputs/Rasters/BaseRasters/BaseRaster_",
+                                FiresOfInterest[i],".tif"))
+  
+  a <- raster::resample(variables[[i]], baseFireRast, method = "bilinear")
+  Fire <- st_as_sf(StudyFirePerims %>% dplyr::filter(FIRE_NUMBE == FiresOfInterest[i]))
+  b <- mask(a,Fire)*1000
+  writeRaster(b,paste0(SpatialFilesPath, "/Inputs/Rasters/dNBR/",FiresOfInterest[i],
+                       "dNBR_ReSamp.tif"),overwrite=TRUE)
+  c <- raster::reclassify(b,rclmat)
+  writeRaster(c,paste0(SpatialFilesPath, "/Inputs/Rasters/dNBR/",FiresOfInterest[i],
+                       "dNBR_CAT.tif"),overwrite=TRUE)
+}
 
