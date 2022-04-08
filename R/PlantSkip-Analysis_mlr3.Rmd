@@ -12,16 +12,14 @@ More info: https://mlr3book.mlr-org.com/introduction.html
 
 Overall data flow:
 Step 1: Prepare data
-Step 2: Create spatial task
-Step 3: Create learner (ranger regression)
-Step 4: Model cross-validation, assess model
-Step 5: Train model & get R2(oob)
-Step 6: Tune feature selection (tune model)
-Step 7: Create new task with filtered features
-Step 8: Model cross-validation on tuned model
-Step 9: Train tuned model & get R2(oob)
-Step 10: Decide whether to use original or tuned model
-Step 11: Model interpretation - variable importance, partial dependence plots
+Step 2: Define spatial task
+Step 3: Define learner (ranger classification)
+Step 4: Separate task into learning (80%) and test (20%) datasets
+Step 5: Train learner on training data
+Step 6: Optimize hyperparameters (ntrees & mtry) using spatial cross fold validation
+Step 7: Predict test data using trained learner
+Step 8: Evaluate model on test data
+Step 9: Visualize 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -171,7 +169,7 @@ Load data as sf object
 ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
                    "OPENING_ID", "PileBurn", "Prune", "Soil", "Spaced", 
                    "SpotBurn", "WBurn","dNBRCAT")
-datPath <- "./Inputs/" #"C:/Users/farne/Documents/"
+datPath <-  "C:/Users/farne/Documents/" #"./Inputs/"
 
 Chutanli <- fread(paste0(datPath,"G41607dat270.csv"))
 Chutanli <- Chutanli %>%
@@ -233,7 +231,6 @@ Nadina_sf_cat <- sf::st_as_sf(Nadina[,-c("dNBR")], coords = c("x", "y"))
 
 
 # Chutanli
-Train a ranger model then do model interpretation
 ```{r Chutanli, echo=FALSE}
 ############################ With Plantation age ##############################
 
@@ -246,130 +243,112 @@ task = TaskRegrST$new("Chutanli",
 #--- Step 2: Define a learner
 # default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
 learner = lrn("regr.ranger", 
-              num.trees = 1000,
               importance = "permutation",
               respect.unordered.factors = "order",
               predict_type = "response",
               num.threads = 20)
 
-#--- Step 3: Model validation
-# lists different performance measures https://mlr3.mlr-org.com/reference/mlr_measures.html 
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rr = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rr$aggregate(msr("regr.rsq")) # fold R2 (avg. perforamance over all k fold from CV)
-rr$aggregate(msr("regr.mse")) # mean square error
-rr$aggregate(msr("oob_error")) # out-of-bag-error
-rr$prediction()$score(msr("regr.rsq")) # global R2 (R2 over every data point predicted during CV)
+#--- Step 3: Split task into training/test datasets
+train_set = sample(task$nrow, 0.8 * task$nrow)
+test_set = setdiff(seq_len(task$nrow), train_set)
 
-#--- Step 4: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
+task_train = task$clone()$filter(rows=train_set)
+task_test = task$clone()$filter(rows=test_set)
 
 
-#--- Step 5: Feature selection
-resampling = rsmp("spcv_coords") 
+#--- Step 4: Feature selection (using nested resampling)
 measure = msr("regr.rsq")
+fselector = fs("random_search") # using random_search b/c of large search space
 terminator = trm("evals", n_evals=20)
-
-instance = FSelectInstanceSingleCrit$new(
-  task = task,
+inner_resampling = rsmp("spcv_coords", folds=10)
+  
+optFtlrn = AutoFSelector$new(
   learner = learner,
-  resampling = resampling,
-  measure = measure, 
-  terminator = terminator
+  resampling = inner_resampling,
+  measure = measure,
+  terminator = terminator,
+  fselector = fselector
 )
 
-fselector = fs("random_search")
-fselector$optimize(instance)
-instance$result_feature_set
+outer_resampling = rsmp("spcv_coords", folds=5)
+
+rr = resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
 
 
-#--- Step 5: Subset task with selected features
-task$select(instance$result_feature_set) # subsets task, so need to reread original if want to use
+#--- Step 5: Model evaluation
+# outer folds
+rr$score(measure)
+# Unbiased performance of model with optimal hyperparameters
+rr$aggregate(measure)
 
 
-#--- Step 6: Tuned model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rrFlt = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rrFlt$aggregate(msr("regr.rsq")) # fold
-rrFlt$prediction()$score(msr("regr.rsq")) # global
-# fold R2 = 0.15
-# global R2 = 0.22
+#--- Step 6: Train final model (applies tuning)
+optFtlrn$train(task_train)
+optFtlrn$model
 
+#--- Step 7: Predict on test data
+prediction = optFtlrn$predict(task_test)
+prediction$score(measure)
 
-#--- Step 7: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.34
+#--- Step 8: Model visualization
 
-#--- Step 8: Model interpretation
+# Feature importance
+importance = as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
+colnames(importance) = c("Feature", "Importance")
+ggplot(importance, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_col() + coord_flip() + xlab("")
+
 #--- using IML package
-#data = as.data.frame(Chutanli_sf) # IML package can't handle sf objects
+
 #x = data[,which(names(data) != c("dNBR","geometry","V1"))]
-dat = as.data.table(Chutanli_sf)
-x <- dat[,-c("dNBR","geometry")]
-#x <- as.data.frame(x)
-#dat <- as.data.frame(dat)
-model = Predictor$new(learner, data = x, y = dat$dNBR)
+dat = as.data.table(Chutanli_sf_con) 
+x = dat[,-c("dNBR","geometry")]
 
-# Feature Effects - ale plots
-#      computes the effects for all given features on the model prediction
-#      ale plots > pdp plots because they still work when features are correlated
-effect = FeatureEffects$new(model, method = "ale") # accumulated local effects 
-plot(effect)
+# Correlation matrix
+cor(x[, sapply(x, is.numeric)], 
+    method = "pearson")
 
-# or look at partial dependance plots
+# Partial Dependence plots
+model = Predictor$new(optFtlrn, data = x, y = dat$dNBR)
 effect = FeatureEffects$new(model, method = "pdp") # partial dependance plots
 plot(effect)
 
-# Shapley
-#      computes feature contributions for single predictions with the Shapley value
-#      Given the current set of feature values, the contribution of a feature value to the difference between the actual              prediction and the mean prediction is the estimated Shapley value
-x.interest = data.frame(x[1,])  
-shapley = Shapley$new(model, x.interest = x.interest)
-plot(shapley) # phi gives increase or decrease in probability given the values on vertical axis
 
 # Feature Imp
 #       Level of importance of the features
-# I input the below variables before I did the variable permutation filter - so will likely have to change these as some of these variables were removed from the task in step 5
-num_features = c("DOBrounded", "PlantAge", "BASAL_AREA", "CROWN_CLOS", "PineCov", "SpruceCov", "BroadBurn", "Brushed")
+impFt = importance$Feature
 effect.imp = FeatureImp$new(model, loss = "mae") # mean absolute error
-effect.imp$plot(features = num_features)
+effect.imp$plot(features = impFt)
 
-# Independent test data
-train_set = sample(task$nrow, 0.8 * task$nrow) # train on 80% of data
-test_set = setdiff(seq_len(task$nrow), train_set)
-learner$train(task, row_ids = train_set)
-prediction = learner$predict(task, row_ids = test_set)
+#--- Compare training to test 
+# Feature Importance
+# training
+model.train = Predictor$new(optFtlrn, data = dat[train_set,-c("geometry")], y = "dNBR")
+effect = FeatureImp$new(model.train, loss = "mae")
+plot_train = plot(effect, features = impFt)
 
-# plot on training
-
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_train = plot(effect, features = num_features)
-
-# plot on test data
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_test = plot(effect, features = num_features)
+# test
+model.test = Predictor$new(optFtlrn, data = dat[test_set,-c("geometry")], y = "dNBR")
+effect = FeatureImp$new(model.test, loss = "mae")
+plot_test = plot(effect, features = impFt)
 
 # combine into single plot
 plot_train + plot_test
 
 # Feature effects
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
+# training
+effect = FeatureEffects$new(model.train)
+plot(effect, features = impFt)
 
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
+# test
+effect = FeatureEffects$new(model.train)
+plot(effect, features = impFt)
 
 
 #--- DALEX
 # similar to IML package
 #     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(learner,
+model_exp = explain_mlr3(optFtlrn,
                          data = x, # provide data without y 
                          y = dat$dNBR,
                          label = "Chutanli",
@@ -382,153 +361,145 @@ head(model_vi)
 plot(model_vi, show_boxplots = FALSE)
 
 # Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
 pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
+                   variables = impFt)$agr_profiles
 pd
 plot(pd) +
   scale_y_continuous("Estimated dNBR") +
   ggtitle("Partial Dependence profiles for selected variables")
 
+
+
+################################################################################
 #################################### Categorical response variable
 #--- Step 1: Define a task
-dat <- as.data.table(Chutanli_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
+# dat <- as.data.table(Chutanli_sf_cat)
+# dat <- dat[,-c("geometry")]
+# x <- dat[,-c("dNBRCAT")]
+# dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
 
-task = TaskClassif$new("Chutanli",
-                       backend = dat, 
+task = TaskClassifST$new("Chutanli",
+                       backend = Chutanli_sf_cat, #dat, 
                        target = "dNBRCAT")
 
 #--- Step 2: Define a learner
 # default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("classif.ranger", 
-              num.trees = 1000,
+learner = lrn("classif.ranger",
               importance = "permutation",
               respect.unordered.factors = "order",
-              predict_type = "response",
+              predict_type = "prob",
               num.threads=20)
 
-#--- Step 3: Model validation
-# lists different performance measures https://mlr3.mlr-org.com/reference/mlr_measures.html 
-resampling <- rsmp("bootstrap", ratio=0.8, repeats=30)
-rr <- mlr3::resample(task = task, learner = learner, resampling = resampling,
-                     store_models = TRUE, store_backends = FALSE)
-rr$aggregate(msr("classif.ce")) # classification error
-rr$score(msr("classif.ce")) 
-rr$score(msr("classif.acc")) 
+#--- Step 3: Split stratified task into test/train data
+split = partition(task, ratio=0.8, stratify=TRUE)
 
-#rr$aggregate(msr("oob_error")) # out-of-bag-error
-rr$prediction()$score(msr("classif.ce")) # global R2 (R2 over every data point predicted during CV)
+task_train = task$clone()$filter(rows=split$train)
+task_test = task$clone()$filter(rows=split$test)
 
-#--- Step 4: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-
-
-#--- Step 5: Feature selection
-resampling = rsmp("spcv_coords") 
-measure = msr("classif.ce")
+#--- Step 4: Feature selection (using nested resampling)
+measure = msr("classif.ce") #classification error
+fselector = fs("random_search") # using random_search b/c of large search space
 terminator = trm("evals", n_evals=20)
-
-instance = FSelectInstanceSingleCrit$new(
-  task = task,
+inner_resampling = rsmp("spcv_coords", folds=10)
+  
+optFtlrn = AutoFSelector$new(
   learner = learner,
-  resampling = resampling,
-  measure = measure, 
-  terminator = terminator
+  resampling = inner_resampling,
+  measure = measure,
+  terminator = terminator,
+  fselector = fselector
 )
 
-fselector = fs("random_search")
-fselector$optimize(instance)
-instance$result_feature_set
+outer_resampling = rsmp("spcv_coords", folds=5)
+
+rr = resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
 
 
-#--- Step 5: Subset task with selected features
-task$select(instance$result_feature_set) # subsets task, so need to reread original if want to use
+#--- Step 5: Model evaluation
+# outer folds
+rr$score(measure)
+# Unbiased performance of model with optimal hyperparameters
+rr$aggregate(measure)
 
 
-#--- Step 6: Tuned model validation
-resampling <- rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rrFlt <- mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rrFlt$aggregate(msr("classif.ce")) # fold
-rrFlt$prediction()$score(msr("classif.ce")) # global
+#--- Step 6: Train final model (applies tuning)
+optFtlrn$train(task_train)
+optFtlrn$model
+
+#--- Step 7: Predict on test data
+prediction = optFtlrn$predict(task_test)
+prediction$score(measure)
 
 
+#--- Step 8: Model visualization
+# Feature importance
+importance = as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
+colnames(importance) = c("Feature", "Importance")
+ggplot(importance, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_col() + coord_flip() + xlab("")
 
-#--- Step 7: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.34
-
-#--- Step 8: Model interpretation
 #--- using IML package
-#data = as.data.frame(Chutanli_sf) # IML package can't handle sf objects
-#x = data[,which(names(data) != c("dNBR","geometry","V1"))]
 dat <- as.data.table(Chutanli_sf_cat)
 x <- dat[,-c("dNBRCAT","geometry")]
-#x <- as.data.frame(x)
-#dat <- as.data.frame(dat)
-model <- Predictor$new(learner, data = x, y = dat$dNBRCAT)
 
-# Feature Effects - ale plots
-#      computes the effects for all given features on the model prediction
-#      ale plots > pdp plots because they still work when features are correlated
-effect <- FeatureEffects$new(model, method = "ale") # accumulated local effects 
-plot(effect)
+model <- Predictor$new(optFtlrn, data = x, y = dat$dNBRCAT)
 
 # or look at partial dependance plots
 effect <- FeatureEffects$new(model, method = "pdp") # partial dependance plots
 plot(effect)
 
-# Shapley
-#      computes feature contributions for single predictions with the Shapley value
-#      Given the current set of feature values, the contribution of a feature value to the difference between the actual              prediction and the mean prediction is the estimated Shapley value
-x.interest <- data.frame(x[1,])  
-shapley <- Shapley$new(model, x.interest = x.interest)
-plot(shapley) # phi gives increase or decrease in probability given the values on vertical axis
 
-# Feature Imp
-#       Level of importance of the features
-# I input the below variables before I did the variable permutation filter - so will likely have to change these as some of these variables were removed from the task in step 5
-#num_features = c("DOBrounded", "PlantAge", "BASAL_AREA", "CROWN_CLOS", "PineCov", "SpruceCov", "BroadBurn", "Brushed")
-effect.imp <- FeatureImp$new(model, loss = "ce") # mean absolute error
-effect.imp$plot(features = features)
+#--- Compare training to test 
+# Feature Importance
+# training
+model.train = Predictor$new(optFtlrn, data = dat[train_set,-c("geometry")], y = "dNBR")
+effect = FeatureImp$new(model.train, loss = "ce")
+plot_train = plot(effect, features = impFt)
 
-# Independent test data
-train_set = sample(task$nrow, 0.8 * task$nrow) # train on 80% of data
-test_set = setdiff(seq_len(task$nrow), train_set)
-
-learner$predict_type = "prob"
-
-learner$train(task, row_ids = train_set)
-prediction = learner$predict(task, row_ids = test_set)
-
-# plot on training
-
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBRCAT")
-effect = FeatureImp$new(model, loss = "ce")
-plot_train = plot(effect, features = num_features)
-
-# plot on test data
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBRCAT")
-effect = FeatureImp$new(model, loss = "ce")
-plot_test = plot(effect, features = num_features)
+# test
+model.test = Predictor$new(optFtlrn, data = dat[test_set,-c("geometry")], y = "dNBR")
+effect = FeatureImp$new(model.test, loss = "ce")
+plot_test = plot(effect, features = impFt)
 
 # combine into single plot
 plot_train + plot_test
 
 # Feature effects
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBRCAT")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
+# training
+effect = FeatureEffects$new(model.train)
+plot(effect, features = impFt)
 
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBRCAT")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
+# test
+effect = FeatureEffects$new(model.train)
+plot(effect, features = impFt)
+
+
+#--- DALEX
+# similar to IML package
+#     Methods for analyzing the model at the level of a single prediction and the global level
+model_exp = explain_mlr3(optFtlrn,
+                         data = x, # provide data without y 
+                         y = dat$dNBR,
+                         label = "Chutanli",
+                         colorize = FALSE)
+
+# Dataset level exploration
+# Importance of variables - permutation based importance
+model_vi = model_parts(model_exp)
+head(model_vi)
+plot(model_vi, show_boxplots = FALSE)
+
+# Partial dependence plots of top variables
+pd = model_profile(model_exp, 
+                   variables = impFt)$agr_profiles
+pd
+plot(pd) +
+  scale_y_continuous("Estimated dNBR") +
+  ggtitle("Partial Dependence profiles for selected variables")
 
 ```
+
+Ingrid has not touched anything below this - April 8, 2022
 
 # Tezzeron
 Train a ranger model then do model interpretation
