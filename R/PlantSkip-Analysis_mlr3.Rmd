@@ -169,7 +169,7 @@ Load data as sf object
 ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
                    "OPENING_ID", "PileBurn", "Prune", "Soil", "Spaced", 
                    "SpotBurn", "WBurn","dNBRCAT")
-datPath <-  "C:/Users/farne/Documents/" #"./Inputs/"
+datPath <-  "./Inputs/" #"C:/Users/farne/Documents/" 
 
 Chutanli <- fread(paste0(datPath,"G41607dat270.csv"))
 Chutanli <- Chutanli %>%
@@ -260,7 +260,7 @@ task_test = task$clone()$filter(rows=test_set)
 measure = msr("regr.rsq")
 fselector = fs("random_search") # using random_search b/c of large search space
 terminator = trm("evals", n_evals=20)
-inner_resampling = rsmp("spcv_coords", folds=10)
+inner_resampling = rsmp("spcv_coords", folds=5)
   
 optFtlrn = AutoFSelector$new(
   learner = learner,
@@ -272,7 +272,7 @@ optFtlrn = AutoFSelector$new(
 
 outer_resampling = rsmp("spcv_coords", folds=5)
 
-rr = resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
+rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
 
 
 #--- Step 5: Model evaluation
@@ -287,8 +287,8 @@ optFtlrn$train(task_train)
 optFtlrn$model
 
 #--- Step 7: Predict on test data
-prediction = optFtlrn$predict(task_test)
-prediction$score(measure)
+optFtlrnPred = optFtlrn$predict(task_test)
+optFtlrnPred$score(measure)
 
 #--- Step 8: Model visualization
 
@@ -377,6 +377,12 @@ plot(pd) +
 # dat <- dat[,-c("geometry")]
 # x <- dat[,-c("dNBRCAT")]
 # dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
+#Chutanli_sf_cat <- dplyr::select(Chutanli_sf_cat, - PlantAge)
+Chut_dat <- as.data.table(Chutanli_sf_cat)
+Chut_corMat <- cor(Chut_dat[,!c("dNBRCAT","BEC","BroadBurn","Brushed", "DebrisPiled", "Fertil", "PileBurn",
+                                "Soil","Spaced","geometry")])
+
+#interestingly, plantation age isn't correlated with other variables. fire weather might need a re-think
 
 task = TaskClassifST$new("Chutanli",
                        backend = Chutanli_sf_cat, #dat, 
@@ -391,7 +397,7 @@ learner = lrn("classif.ranger",
               num.threads=20)
 
 #--- Step 3: Split stratified task into test/train data
-split = partition(task, ratio=0.8, stratify=TRUE)
+split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime?
 
 task_train = task$clone()$filter(rows=split$train)
 task_test = task$clone()$filter(rows=split$test)
@@ -400,8 +406,8 @@ task_test = task$clone()$filter(rows=split$test)
 measure = msr("classif.ce") #classification error
 fselector = fs("random_search") # using random_search b/c of large search space
 terminator = trm("evals", n_evals=20)
-inner_resampling = rsmp("spcv_coords", folds=10)
-  
+inner_resampling = rsmp("spcv_coords", folds=5)
+ 
 optFtlrn = AutoFSelector$new(
   learner = learner,
   resampling = inner_resampling,
@@ -411,9 +417,9 @@ optFtlrn = AutoFSelector$new(
 )
 
 outer_resampling = rsmp("spcv_coords", folds=5)
+autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
 
-rr = resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
-
+rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
 
 #--- Step 5: Model evaluation
 # outer folds
@@ -421,15 +427,32 @@ rr$score(measure)
 # Unbiased performance of model with optimal hyperparameters
 rr$aggregate(measure)
 
+#So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data
 
 #--- Step 6: Train final model (applies tuning)
-optFtlrn$train(task_train)
+optFtlrn$train(task_train) #I don't see how the tuning is applied here
 optFtlrn$model
 
 #--- Step 7: Predict on test data
-prediction = optFtlrn$predict(task_test)
-prediction$score(measure)
+optFtlrnPred = optFtlrn$predict(task_test) 
+optFtlrnPred$score(measure)
 
+#cross-validated predictions (only train data)
+rr$prediction()
+#trained model predictions
+optFtlrnPred$prob
+
+#confusion matrix:
+rr$prediction()$confusion
+optFtlrnPred$confusion
+
+rr$score()
+optFtlrnPred$score()
+
+sum(rr$prediction()$confusion) #so this is on the training data
+sum(optFtlrnPred$confusion) # this is on the test data
+
+#it's good at predicting unburned, there is no high severity here
 
 #--- Step 8: Model visualization
 # Feature importance
@@ -438,26 +461,44 @@ colnames(importance) = c("Feature", "Importance")
 ggplot(importance, aes(x = reorder(Feature, Importance), y = Importance)) +
   geom_col() + coord_flip() + xlab("")
 
+# Feature Imp
+#       Level of importance of the features
+#AC: I think we need to pass just the training data?
+dat_train <- task_train$data()
+x_train <- dat_train[,-c("dNBRCAT")]
+dat_test <- task_test$data()
+
+impFt = importance$Feature
+model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
+effect.imp = FeatureImp$new(model, loss = "ce")
+effect.imp$plot(features = impFt)
+
+
+
+######################################################
+
+###AC: I'm not sure about everything from here down
+
 #--- using IML package
 dat <- as.data.table(Chutanli_sf_cat)
 x <- dat[,-c("dNBRCAT","geometry")]
 
-model <- Predictor$new(optFtlrn, data = x, y = dat$dNBRCAT)
+
+model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
 
 # or look at partial dependance plots
 effect <- FeatureEffects$new(model, method = "pdp") # partial dependance plots
 plot(effect)
 
-
-#--- Compare training to test 
+#--- Compare training to test - AC: I'm not sure yet what this is doing exactly
 # Feature Importance
 # training
-model.train = Predictor$new(optFtlrn, data = dat[train_set,-c("geometry")], y = "dNBR")
+model.train = Predictor$new(optFtlrn, data = dat_train, y = "dNBRCAT")
 effect = FeatureImp$new(model.train, loss = "ce")
-plot_train = plot(effect, features = impFt)
+plot_train = plot(effect, features = impFt) #this is different than the feature importance above
 
 # test
-model.test = Predictor$new(optFtlrn, data = dat[test_set,-c("geometry")], y = "dNBR")
+model.test = Predictor$new(optFtlrn, data = dat_test, y = "dNBRCAT")
 effect = FeatureImp$new(model.test, loss = "ce")
 plot_test = plot(effect, features = impFt)
 
@@ -479,7 +520,7 @@ plot(effect, features = impFt)
 #     Methods for analyzing the model at the level of a single prediction and the global level
 model_exp = explain_mlr3(optFtlrn,
                          data = x, # provide data without y 
-                         y = dat$dNBR,
+                         y = dat$dNBRCAT,
                          label = "Chutanli",
                          colorize = FALSE)
 
