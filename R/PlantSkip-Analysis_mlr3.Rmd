@@ -46,9 +46,10 @@ FiresOfInterest <- c("G41607", "G51632", "R11498", "R11796","R11921","R21721")
 
 # Read in the rasters
 variable_list <- list.files(paste0(SpatialFilesPath, "/Inputs/Rasters/"),
-                            pattern =  paste(FiresOfInterest, sep = "", collapse = "|"), # only import the fires of interest
+                            pattern =  paste(FiresOfInterest, sep = "", collapse = "|"),
                             recursive = TRUE,
                             full.names = TRUE)
+
 variable_list <- grep("tif", variable_list, value=TRUE)
 # Drop OpenID, None and SitePrepped
 variable_list <- grep("OpenID|None|SitePrepped|n83", variable_list, value = TRUE, invert = TRUE)
@@ -430,7 +431,7 @@ rr$aggregate(measure)
 #So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data
 
 #--- Step 6: Train final model (applies tuning)
-optFtlrn$train(task_train) #I don't see how the tuning is applied here
+optFtlrn$train(task_train) 
 optFtlrn$model
 
 #--- Step 7: Predict on test data
@@ -541,6 +542,130 @@ plot(pd) +
 ```
 
 Ingrid has not touched anything below this - April 8, 2022
+
+
+Alana - making a loop to run through each fire and extract results
+```{r}
+
+task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
+dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat,Island_sf_cat,
+                 Verdun_sf_cat, Tezzeron_sf_cat)
+CV_Conf <- list()
+Test_Conf <- list()
+TrainImp_dat <- list()
+NumCores <- 20
+
+for(i in 1:length(task_names)){
+  task = TaskClassifST$new(task_names[i],
+                         backend = dat_list[[i]], 
+                         target = "dNBRCAT")
+  
+  #--- Step 2: Define a learner
+  # default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
+  learner = lrn("classif.ranger",
+                importance = "permutation",
+                respect.unordered.factors = "order",
+                predict_type = "prob",
+                num.threads=NumCores)
+  
+  #--- Step 3: Split stratified task into test/train data
+  split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime?
+  
+  task_train = task$clone()$filter(rows=split$train)
+  task_test = task$clone()$filter(rows=split$test)
+  
+  #--- Step 4: Feature selection (using nested resampling)
+  measure = msr("classif.ce") #classification error
+  fselector = fs("random_search") # using random_search b/c of large search space
+  terminator = trm("evals", n_evals=20)
+  inner_resampling = rsmp("spcv_coords", folds=5)
+   
+  optFtlrn = AutoFSelector$new(
+    learner = learner,
+    resampling = inner_resampling,
+    measure = measure,
+    terminator = terminator,
+    fselector = fselector
+  )
+  
+  outer_resampling = rsmp("spcv_coords", folds=5)
+  autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
+  
+  rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
+  
+  #--- Step 5: Model evaluation
+  # outer folds
+  rr$score(measure)
+  # Unbiased performance of model with optimal hyperparameters
+  rr$aggregate(measure)
+  
+  #So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data
+  
+  #--- Step 6: Train final model (applies tuning)
+  optFtlrn$train(task_train) #I don't see how the tuning is applied here
+  #optFtlrn$model
+  
+  #--- Step 7: Predict on test data
+  optFtlrnPred <- optFtlrn$predict(task_test) 
+  optFtlrnPred$score(measure)
+  
+  #cross-validated predictions (only train data)
+  rr$prediction()
+  #trained model predictions
+  optFtlrnPred$prob
+  
+  #confusion matrix:
+  CV_Conf[[i]] <- rr$prediction()$confusion
+  Test_Conf[[i]] <- optFtlrnPred$confusion
+  
+  rr$score()
+  optFtlrnPred$score()
+  
+  sum(rr$prediction()$confusion) #so this is on the training data
+  sum(optFtlrnPred$confusion) # this is on the test data
+  
+  #it's good at predicting unburned, there is no high severity here
+  
+  #--- Step 8: Model visualization
+  # Feature importance
+  TrainImp_dat[[i]] <- as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
+  
+  # Feature Imp
+  #       Level of importance of the features
+  #AC: I think we need to pass just the training data?
+  #dat_train <- task_train$data()
+  #x_train <- dat_train[,-c("dNBRCAT")]
+  #dat_test <- task_test$data()
+  
+  #impFt <- TrainImp_dat[[i]]$Feature
+  #model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
+  #effect.imp <- FeatureImp$new(model, loss = "ce")
+  #effect.imp$plot(features = impFt)
+}  
+  
+
+CV_Conf
+Test_Conf
+
+ggplot(TrainImp_dat[[3]], aes(x = reorder(V1, V2), y = V2)) +
+  geom_col() +
+  coord_flip() + 
+  xlab("")
+
+
+#my attempt to make that multi-fire graph:
+TrainImp_dat[[1]][,FireID:=task_names[1]]
+TrainImp_dat[[2]][,FireID:=task_names[2]]
+
+ggplot(TrainImp_dat[[2]], aes(x = reorder(V1, V2), y = V2)) +
+  geom_point() +
+  coord_flip() + 
+  xlab("")
+  
+```
+
+
+
 
 # Tezzeron
 Train a ranger model then do model interpretation
