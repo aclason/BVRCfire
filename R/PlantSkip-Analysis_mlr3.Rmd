@@ -170,7 +170,7 @@ Load data as sf object
 ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
                    "OPENING_ID", "PileBurn", "Prune", "Soil", "Spaced", 
                    "SpotBurn", "WBurn","dNBRCAT")
-datPath <-  "./Inputs/" #"C:/Users/farne/Documents/" 
+datPath <-  "C:/Users/farne/Documents/" #"./Inputs/"  
 
 Chutanli <- fread(paste0(datPath,"G41607dat270.csv"))
 Chutanli <- Chutanli %>%
@@ -233,6 +233,317 @@ Nadina_sf_cat <- sf::st_as_sf(Nadina[,-c("dNBR")], coords = c("x", "y"))
 
 # Chutanli
 ```{r Chutanli, echo=FALSE}
+
+
+################################################################################
+#################################### Categorical response variable
+#--- Step 1: Define a task
+# dat <- as.data.table(Chutanli_sf_cat)
+# dat <- dat[,-c("geometry")]
+# x <- dat[,-c("dNBRCAT")]
+# dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
+#Chutanli_sf_cat <- dplyr::select(Chutanli_sf_cat, - PlantAge)
+set.seed(456)
+
+
+Chut_dat <- as.data.table(Chutanli_sf_cat)
+Chut_corMat <- cor(Chut_dat[,!c("dNBRCAT","BEC","BroadBurn","Brushed", "DebrisPiled", "Fertil", "PileBurn",
+                                "Soil","Spaced","geometry")])
+
+#interestingly, plantation age isn't correlated with other variables. fire weather might need a re-think
+
+task = TaskClassifST$new("Chutanli",
+                       backend = Chutanli_sf_cat, #dat, 
+                       target = "dNBRCAT")
+
+#--- Step 2: Define a learner
+# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
+learner = lrn("classif.ranger",
+              importance = "permutation",
+              respect.unordered.factors = "order",
+              predict_type = "prob",
+              num.threads=20)
+
+#--- Step 3: Split stratified task into test/train data
+split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime? -- Set seed at the very beginning of workflow. partition() is a mlr3 function so set.seed at beginning appears to work. Ran, cleared, reran and splits were the same both times. 
+
+task_train = task$clone()$filter(rows=split$train)
+task_test = task$clone()$filter(rows=split$test)
+
+#--- Step 4: Feature selection (using nested resampling)
+measure = msr("classif.ce") #classification error
+fselector = fs("random_search") # using random_search b/c of large search space
+
+level = 0.5 #0.1 # Alana try 0.1
+terminator = trm("stagnation", iters=20, threshold=0)
+#terminator = trm("perf_reached", level=level)#fselector stops after model measure is within 10% of best model
+# doesn't seem to terminate with level <0.5, anything higher and terminates right after 1 evaluation... but not sure what this means? unstable model? .. but maybe on Alana's computer it actually terminates in a reasonable time
+inner_resampling = rsmp("spcv_coords", folds=5)
+ 
+optFtlrn = AutoFSelector$new(
+  learner = learner,
+  resampling = inner_resampling,
+  measure = measure,
+  terminator = terminator,
+  fselector = fselector
+)
+
+# outer_resampling = rsmp("spcv_coords", folds=5)
+# autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
+# 
+# rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
+# 
+# #--- Step 5: Model evaluation
+# # outer folds
+# rr$score(measure)
+# # Unbiased performance of model with optimal hyperparameters
+# rr$aggregate(measure)
+
+#So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data - Yes, need to pick one or the other because if you run both, the test data model evaluation increases (because learner has been trained twice)
+
+#--- Step 6: Train final model (applies tuning)
+optFtlrn$train(task_train) 
+optFtlrn$model
+
+#--- Step 7: Predict on test data & assess model
+optFtlrnPred = optFtlrn$predict(task_test) 
+optFtlrnPred$score(measure)
+# 
+#cross-validated predictions (only train data)
+# rr$prediction()
+#trained model predictions
+optFtlrnPred$prob
+
+#confusion matrix:
+# rr$prediction()$confusion
+optFtlrnPred$confusion
+
+
+
+# sum(rr$prediction()$confusion) #so this is on the training data
+sum(optFtlrnPred$confusion) # this is on the test data
+
+#it's good at predicting unburned, there is no high severity here
+
+#--- Step 8: Model visualization
+# Feature importance
+importance = as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
+colnames(importance) = c("Feature", "Importance")
+ggplot(importance, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_col() + coord_flip() + xlab("")
+
+# Feature Imp
+#       Level of importance of the features
+#AC: I think we need to pass just the training data?
+dat_train <- task_train$data()
+x_train <- dat_train[,-c("dNBRCAT")]
+dat_test <- task_test$data()
+
+impFt = importance$Feature
+model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
+effect.imp = FeatureImp$new(model, loss = "ce")
+effect.imp$plot(features = impFt)
+
+
+
+######################################################
+
+###AC: I'm not sure about everything from here down
+
+#--- using IML package
+dat <- as.data.table(Chutanli_sf_cat)
+x <- dat[,-c("dNBRCAT","geometry")]
+
+
+model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
+
+# or look at partial dependance plots
+effect <- FeatureEffects$new(model, method = "pdp") # partial dependance plots
+plot(effect)
+
+#--- Compare training to test - AC: I'm not sure yet what this is doing exactly
+# Feature Importance
+# training
+model.train = Predictor$new(optFtlrn, data = dat_train, y = "dNBRCAT")
+effect = FeatureImp$new(model.train, loss = "ce")
+plot_train = plot(effect, features = impFt) #this is different than the feature importance above
+
+# test
+model.test = Predictor$new(optFtlrn, data = dat_test, y = "dNBRCAT")
+effect = FeatureImp$new(model.test, loss = "ce")
+plot_test = plot(effect, features = impFt)
+
+# combine into single plot
+plot_train + plot_test
+
+# Feature effects
+# training
+effect = FeatureEffects$new(model.train)
+plot(effect, features = impFt)
+
+# test
+effect = FeatureEffects$new(model.train)
+plot(effect, features = impFt)
+
+
+#--- DALEX
+# similar to IML package
+#     Methods for analyzing the model at the level of a single prediction and the global level
+model_exp = explain_mlr3(optFtlrn,
+                         data = x, # provide data without y 
+                         y = dat$dNBRCAT,
+                         label = "Chutanli",
+                         colorize = FALSE)
+
+# Dataset level exploration
+# Importance of variables - permutation based importance
+model_vi = model_parts(model_exp)
+head(model_vi)
+plot(model_vi, show_boxplots = FALSE)
+
+# Partial dependence plots of top variables
+pd = model_profile(model_exp, 
+                   variables = impFt)$agr_profiles
+pd
+plot(pd) +
+  scale_y_continuous("Estimated dNBR") +
+  ggtitle("Partial Dependence profiles for selected variables")
+
+```
+
+
+
+Alana - making a loop to run through each fire and extract results
+```{r}
+set.seed(456)
+
+task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
+dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat, Island_sf_cat,
+                 Verdun_sf_cat, Tezzeron_sf_cat)
+CV_Conf <- list()
+Test_Conf <- list()
+TrainImp_dat <- list()
+NumCores <- 20
+
+for(i in 1:length(task_names)){
+  task = TaskClassifST$new(task_names[i],
+                         backend = dat_list[[i]], 
+                         target = "dNBRCAT")
+  
+  #--- Step 2: Define a learner
+  # default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
+  learner = lrn("classif.ranger",
+                importance = "permutation",
+                respect.unordered.factors = "order",
+                predict_type = "prob",
+                num.threads=NumCores)
+  
+  #--- Step 3: Split stratified task into test/train data
+  split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime? - can use set.seed at begining 
+  
+  task_train = task$clone()$filter(rows=split$train)
+  task_test = task$clone()$filter(rows=split$test)
+  
+  #--- Step 4: Feature selection (using nested resampling)
+  measure = msr("classif.ce") #classification error
+  fselector = fs("random_search") # using random_search b/c of large search space
+  level = 0.5 #0.1 Alana can you try 0.1 and see if it works?
+  terminator = trm("perf_reached", level=level)
+  inner_resampling = rsmp("spcv_coords", folds=5)
+   
+  optFtlrn = AutoFSelector$new(
+    learner = learner,
+    resampling = inner_resampling,
+    measure = measure,
+    terminator = terminator,
+    fselector = fselector
+  )
+  
+  # outer_resampling = rsmp("spcv_coords", folds=5)
+  # autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
+  # 
+  # rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
+  
+  #--- Step 5: Model evaluation
+  # outer folds
+  # rr$score(measure)
+  # # Unbiased performance of model with optimal hyperparameters
+  # rr$aggregate(measure)
+  # 
+  #So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data
+  
+  #--- Step 6: Train final model (applies tuning)
+  optFtlrn$train(task_train) #I don't see how the tuning is applied here
+  #optFtlrn$model
+  
+  #--- Step 7: Predict on test data
+  optFtlrnPred <- optFtlrn$predict(task_test) 
+  optFtlrnPred$score(measure)
+  # 
+  # #cross-validated predictions (only train data)
+  # rr$prediction()
+  #trained model predictions
+  optFtlrnPred$prob
+  
+  #confusion matrix:
+#  CV_Conf[[i]] <- rr$prediction()$confusion
+  Test_Conf[[i]] <- optFtlrnPred$confusion
+  
+#  rr$score()
+  optFtlrnPred$score()
+  
+#  sum(rr$prediction()$confusion) #so this is on the training data
+  sum(optFtlrnPred$confusion) # this is on the test data
+  
+  #it's good at predicting unburned, there is no high severity here
+  
+  #--- Step 8: Model visualization
+  # Feature importance
+  TrainImp_dat[[i]] <- as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
+  
+  # Feature Imp
+  #       Level of importance of the features
+  #AC: I think we need to pass just the training data?
+  #dat_train <- task_train$data()
+  #x_train <- dat_train[,-c("dNBRCAT")]
+  #dat_test <- task_test$data()
+  
+  #impFt <- TrainImp_dat[[i]]$Feature
+  #model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
+  #effect.imp <- FeatureImp$new(model, loss = "ce")
+  #effect.imp$plot(features = impFt)
+}  
+  
+
+#CV_Conf
+Test_Conf
+
+ggplot(TrainImp_dat[[4]], aes(x = reorder(V1, V2), y = V2)) +
+  geom_col() +
+  coord_flip() + 
+  xlab("")
+
+
+#my attempt to make that multi-fire graph:
+TrainImp_dat[[1]][,FireID:=task_names[1]]
+TrainImp_dat[[2]][,FireID:=task_names[2]]
+
+ggplot(TrainImp_dat[[2]], aes(x = reorder(V1, V2), y = V2)) +
+  geom_point() +
+  coord_flip() + 
+  xlab("")
+  
+# Merge TrainImp_dat into one datatable
+TrainImp_Alldat <- unique(rbindlist(TrainImp_dat, fill=TRUE), by="V1")
+TrainImp_Alldat <- TrainImp_Alldat$V1
+
+
+```
+
+
+
+Chutanli - continuous
+```{r, echo=FALSE}
 ############################ With Plantation age ##############################
 
 ############ Continuous response dNBR
@@ -368,1217 +679,5 @@ pd
 plot(pd) +
   scale_y_continuous("Estimated dNBR") +
   ggtitle("Partial Dependence profiles for selected variables")
-
-
-
-################################################################################
-#################################### Categorical response variable
-#--- Step 1: Define a task
-# dat <- as.data.table(Chutanli_sf_cat)
-# dat <- dat[,-c("geometry")]
-# x <- dat[,-c("dNBRCAT")]
-# dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-#Chutanli_sf_cat <- dplyr::select(Chutanli_sf_cat, - PlantAge)
-Chut_dat <- as.data.table(Chutanli_sf_cat)
-Chut_corMat <- cor(Chut_dat[,!c("dNBRCAT","BEC","BroadBurn","Brushed", "DebrisPiled", "Fertil", "PileBurn",
-                                "Soil","Spaced","geometry")])
-
-#interestingly, plantation age isn't correlated with other variables. fire weather might need a re-think
-
-task = TaskClassifST$new("Chutanli",
-                       backend = Chutanli_sf_cat, #dat, 
-                       target = "dNBRCAT")
-
-#--- Step 2: Define a learner
-# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("classif.ranger",
-              importance = "permutation",
-              respect.unordered.factors = "order",
-              predict_type = "prob",
-              num.threads=20)
-
-#--- Step 3: Split stratified task into test/train data
-split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime?
-
-task_train = task$clone()$filter(rows=split$train)
-task_test = task$clone()$filter(rows=split$test)
-
-#--- Step 4: Feature selection (using nested resampling)
-measure = msr("classif.ce") #classification error
-fselector = fs("random_search") # using random_search b/c of large search space
-terminator = trm("evals", n_evals=20)
-inner_resampling = rsmp("spcv_coords", folds=5)
- 
-optFtlrn = AutoFSelector$new(
-  learner = learner,
-  resampling = inner_resampling,
-  measure = measure,
-  terminator = terminator,
-  fselector = fselector
-)
-
-outer_resampling = rsmp("spcv_coords", folds=5)
-autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
-
-rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
-
-#--- Step 5: Model evaluation
-# outer folds
-rr$score(measure)
-# Unbiased performance of model with optimal hyperparameters
-rr$aggregate(measure)
-
-#So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data
-
-#--- Step 6: Train final model (applies tuning)
-optFtlrn$train(task_train) 
-optFtlrn$model
-
-#--- Step 7: Predict on test data
-optFtlrnPred = optFtlrn$predict(task_test) 
-optFtlrnPred$score(measure)
-
-#cross-validated predictions (only train data)
-rr$prediction()
-#trained model predictions
-optFtlrnPred$prob
-
-#confusion matrix:
-rr$prediction()$confusion
-optFtlrnPred$confusion
-
-rr$score()
-optFtlrnPred$score()
-
-sum(rr$prediction()$confusion) #so this is on the training data
-sum(optFtlrnPred$confusion) # this is on the test data
-
-#it's good at predicting unburned, there is no high severity here
-
-#--- Step 8: Model visualization
-# Feature importance
-importance = as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
-colnames(importance) = c("Feature", "Importance")
-ggplot(importance, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_col() + coord_flip() + xlab("")
-
-# Feature Imp
-#       Level of importance of the features
-#AC: I think we need to pass just the training data?
-dat_train <- task_train$data()
-x_train <- dat_train[,-c("dNBRCAT")]
-dat_test <- task_test$data()
-
-impFt = importance$Feature
-model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
-effect.imp = FeatureImp$new(model, loss = "ce")
-effect.imp$plot(features = impFt)
-
-
-
-######################################################
-
-###AC: I'm not sure about everything from here down
-
-#--- using IML package
-dat <- as.data.table(Chutanli_sf_cat)
-x <- dat[,-c("dNBRCAT","geometry")]
-
-
-model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
-
-# or look at partial dependance plots
-effect <- FeatureEffects$new(model, method = "pdp") # partial dependance plots
-plot(effect)
-
-#--- Compare training to test - AC: I'm not sure yet what this is doing exactly
-# Feature Importance
-# training
-model.train = Predictor$new(optFtlrn, data = dat_train, y = "dNBRCAT")
-effect = FeatureImp$new(model.train, loss = "ce")
-plot_train = plot(effect, features = impFt) #this is different than the feature importance above
-
-# test
-model.test = Predictor$new(optFtlrn, data = dat_test, y = "dNBRCAT")
-effect = FeatureImp$new(model.test, loss = "ce")
-plot_test = plot(effect, features = impFt)
-
-# combine into single plot
-plot_train + plot_test
-
-# Feature effects
-# training
-effect = FeatureEffects$new(model.train)
-plot(effect, features = impFt)
-
-# test
-effect = FeatureEffects$new(model.train)
-plot(effect, features = impFt)
-
-
-#--- DALEX
-# similar to IML package
-#     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(optFtlrn,
-                         data = x, # provide data without y 
-                         y = dat$dNBRCAT,
-                         label = "Chutanli",
-                         colorize = FALSE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-pd = model_profile(model_exp, 
-                   variables = impFt)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-```
-
-Ingrid has not touched anything below this - April 8, 2022
-
-
-Alana - making a loop to run through each fire and extract results
-```{r}
-
-task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
-dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat,Island_sf_cat,
-                 Verdun_sf_cat, Tezzeron_sf_cat)
-CV_Conf <- list()
-Test_Conf <- list()
-TrainImp_dat <- list()
-NumCores <- 20
-
-for(i in 1:length(task_names)){
-  task = TaskClassifST$new(task_names[i],
-                         backend = dat_list[[i]], 
-                         target = "dNBRCAT")
-  
-  #--- Step 2: Define a learner
-  # default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-  learner = lrn("classif.ranger",
-                importance = "permutation",
-                respect.unordered.factors = "order",
-                predict_type = "prob",
-                num.threads=NumCores)
-  
-  #--- Step 3: Split stratified task into test/train data
-  split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime?
-  
-  task_train = task$clone()$filter(rows=split$train)
-  task_test = task$clone()$filter(rows=split$test)
-  
-  #--- Step 4: Feature selection (using nested resampling)
-  measure = msr("classif.ce") #classification error
-  fselector = fs("random_search") # using random_search b/c of large search space
-  terminator = trm("evals", n_evals=20)
-  inner_resampling = rsmp("spcv_coords", folds=5)
-   
-  optFtlrn = AutoFSelector$new(
-    learner = learner,
-    resampling = inner_resampling,
-    measure = measure,
-    terminator = terminator,
-    fselector = fselector
-  )
-  
-  outer_resampling = rsmp("spcv_coords", folds=5)
-  autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
-  
-  rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
-  
-  #--- Step 5: Model evaluation
-  # outer folds
-  rr$score(measure)
-  # Unbiased performance of model with optimal hyperparameters
-  rr$aggregate(measure)
-  
-  #So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data
-  
-  #--- Step 6: Train final model (applies tuning)
-  optFtlrn$train(task_train) #I don't see how the tuning is applied here
-  #optFtlrn$model
-  
-  #--- Step 7: Predict on test data
-  optFtlrnPred <- optFtlrn$predict(task_test) 
-  optFtlrnPred$score(measure)
-  
-  #cross-validated predictions (only train data)
-  rr$prediction()
-  #trained model predictions
-  optFtlrnPred$prob
-  
-  #confusion matrix:
-  CV_Conf[[i]] <- rr$prediction()$confusion
-  Test_Conf[[i]] <- optFtlrnPred$confusion
-  
-  rr$score()
-  optFtlrnPred$score()
-  
-  sum(rr$prediction()$confusion) #so this is on the training data
-  sum(optFtlrnPred$confusion) # this is on the test data
-  
-  #it's good at predicting unburned, there is no high severity here
-  
-  #--- Step 8: Model visualization
-  # Feature importance
-  TrainImp_dat[[i]] <- as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
-  
-  # Feature Imp
-  #       Level of importance of the features
-  #AC: I think we need to pass just the training data?
-  #dat_train <- task_train$data()
-  #x_train <- dat_train[,-c("dNBRCAT")]
-  #dat_test <- task_test$data()
-  
-  #impFt <- TrainImp_dat[[i]]$Feature
-  #model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
-  #effect.imp <- FeatureImp$new(model, loss = "ce")
-  #effect.imp$plot(features = impFt)
-}  
-  
-
-CV_Conf
-Test_Conf
-
-ggplot(TrainImp_dat[[3]], aes(x = reorder(V1, V2), y = V2)) +
-  geom_col() +
-  coord_flip() + 
-  xlab("")
-
-
-#my attempt to make that multi-fire graph:
-TrainImp_dat[[1]][,FireID:=task_names[1]]
-TrainImp_dat[[2]][,FireID:=task_names[2]]
-
-ggplot(TrainImp_dat[[2]], aes(x = reorder(V1, V2), y = V2)) +
-  geom_point() +
-  coord_flip() + 
-  xlab("")
-  
-```
-
-
-
-
-# Tezzeron
-Train a ranger model then do model interpretation
-```{r Tezzeron, echo=FALSE}
-rm(learner, rr, rrFlt)
-
-#--- Step 1: Define a task
-task = TaskRegrST$new("Tezzeron",
-                       backend = Tezzeron_sf, 
-                       target = "dNBR")
-
-
-#--- Step 2: Define a learner
-# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("regr.ranger", 
-              num.trees = 1000,
-              importance = "permutation",
-              respect.unordered.factors = "order",
-              predict_type = "response")
-
-
-#--- Step 3: Model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rr = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rr$aggregate(msr("regr.rsq")) # by fold R2 (avg. perforamance over all k fold from CV)
-rr$prediction()$score(msr("regr.rsq")) # global R2 (R2 over every data point predicted during CV)
-# fold R2 = -0.24
-# global R2 = 0.53
-
-
-#--- Step 4: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.70
-
-
-#--- Step 5: Feature selection
-resampling = rsmp("spcv_coords") 
-measure = msr("regr.rsq")
-terminator = trm("evals", n_evals=20)
-
-instance = FSelectInstanceSingleCrit$new(
-  task = task,
-  learner = learner,
-  resampling = resampling,
-  measure = measure, 
-  terminator = terminator
-)
-
-fselector = fs("random_search")
-fselector$optimize(instance)
-instance$result_feature_set
-
-
-#--- Step 5: Subset task with selected features
-task$select(instance$result_feature_set) # this subsets task, so need to reread original task if want to use it after this
-
-
-#--- Step 6: Tuned model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rrFlt = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rrFlt$aggregate(msr("regr.rsq")) # fold
-rrFlt$prediction()$score(msr("regr.rsq")) # global
-# fold R2 = -0.06
-# global R2 = 0.56
-
-
-#--- Step 7: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.45
-
-
-#--- Step 8: Model interpretation
-#--- IML
-dat = as.data.table(Tezzeron_sf)
-x = dat[,-c("dNBR","geometry")] # hopefully this works, removing geometry
-model = Predictor$new(learner, data = x, y = dat$dNBR)
-
-# Feature Effects - ale plots
-#      computes the effects for all given features on the model prediction
-#      ale plots > pdp plots because they still work when features are correlated
-effect = FeatureEffects$new(model, method = "ale") # accumulated local effects
-plot(effect)
-
-# Shapley
-#      computes feature contributions for single predictions with the Shapley value
-#      Given the current set of feature values, the contribution of a feature value to the difference between the actual              prediction and the mean prediction is the estimated Shapley value
-x.interest = data.frame(x[1,])  
-shapley = Shapley$new(model, x.interest = x.interest)
-plot(shapley) # phi gives increase or decrease in probability given the values on vertical axis
-
-# Feature Imp
-#       Level of importance of the features
-num_features = c("DOBrounded", "PlantAge", "BASAL_AREA", "CROWN_CLOS", "PineCov", "SpruceCov", "BroadBurn", "Brushed")
-effect.imp = FeatureImp$new(model, loss = "mae") # mean absolute error
-effect.imp$plot(features = num_features)
-
-# Independent test data
-train_set = sample(task$nrow, 0.8 * task$nrow)
-test_set = setdiff(seq_len(task$nrow), train_set)
-learner$train(task, row_ids = train_set)
-prediction = learner$predict(task, row_ids = test_set)
-
-# plot on training
-model = Predictor$new(learner, data = dat[train_set,-c ("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_train = plot(effect, features = num_features)
-
-# plot on test data
-model = Predictor$new(learner, data = dat[test_set,- c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_test = plot(effect, features = num_features)
-
-# combine into single plot
-plot_train + plot_test
-
-# Feature effects
-model = Predictor$new(learner, data = dat[train_set, -c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-
-#--- DALEX
-#     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Tezzeron",
-                         colorize = FALSE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-```
-
-# Shovel
-Train a ranger model then do model interpretation
-```{r Shovel, echo=FALSE}
-rm(learner, rr, rrFlt)
-
-########################### with plantation
-#--- Step 1: Define a task
-task = TaskRegrST$new("Shovel",
-                       backend = Shovel_sf, 
-                       target = "dNBR")
-
-
-#--- Step 2: Define a learner
-# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("regr.ranger", 
-              num.trees = 1000,
-              importance = "permutation",
-              respect.unordered.factors = "order",
-              predict_type = "response")
-
-
-#--- Step 3: Model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rr = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rr$aggregate(msr("regr.rsq")) # by fold R2 (avg. perforamance over all k fold from CV)
-rr$prediction()$score(msr("regr.rsq")) # global R2 (R2 over every data point predicted during CV)
-# fold R2 = -0.067
-# global R2 = 0.027
-
-
-#--- Step 4: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.38
-
-
-#--- Step 5: Feature selection
-resampling = rsmp("spcv_coords") 
-measure = msr("regr.rsq")
-terminator = trm("evals", n_evals=20)
-
-instance = FSelectInstanceSingleCrit$new(
-  task = task,
-  learner = learner,
-  resampling = resampling,
-  measure = measure, 
-  terminator = terminator
-)
-
-fselector = fs("random_search")
-fselector$optimize(instance)
-instance$result_feature_set
-
-
-#--- Step 5: Subset task with selected features
-task$select(instance$result_feature_set) # this subsets task, so need to reread original task if want to use it after this
-
-
-#--- Step 6: Tuned model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rrFlt = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rrFlt$aggregate(msr("regr.rsq")) # fold
-rrFlt$prediction()$score(msr("regr.rsq")) # global
-# fold R2 = 0.022
-# global R2 = 0.081
-
-
-#--- Step 7: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.45
-
-
-#--- Step 3: Model interpretation
-#--- IML
-dat = as.data.table(Shovel_sf)
-x <- dat[,-c("dNBR","geometry")]
-model = Predictor$new(learner, data = x, y = dat$dNBR)
-
-# Feature Effects - ale plots
-#      computes the effects for all given features on the model prediction
-#      ale plots > pdp plots because they still work when features are correlated
-effect = FeatureEffects$new(model, method = "ale") # accumulated local effects
-plot(effect)
-
-# Shapley
-#      computes feature contributions for single predictions with the Shapley value
-#      Given the current set of feature values, the contribution of a feature value to the difference between the actual              prediction and the mean prediction is the estimated Shapley value
-x.interest = data.frame(x[1,])  
-shapley = Shapley$new(model, x.interest = x.interest)
-plot(shapley) # phi gives increase or decrease in probability given the values on vertical axis
-
-# Feature Imp
-#       Level of importance of the features
-num_features = c("DOBrounded", "PlantAge", "BASAL_AREA", "CROWN_CLOS", "PineCov", "SpruceCov", "BroadBurn", "Brushed")
-effect.imp = FeatureImp$new(model, loss = "mae") # mean absolute error
-effect.imp$plot(features = num_features)
-
-# Independent test data
-train_set = sample(task$nrow, 0.8 * task$nrow)
-test_set = setdiff(seq_len(task$nrow), train_set)
-learner$train(task, row_ids = train_set)
-prediction = learner$predict(task, row_ids = test_set)
-
-# plot on training
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_train = plot(effect, features = num_features)
-
-# plot on test data
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_test = plot(effect, features = num_features)
-
-# combine into single plot
-plot_train + plot_test
-
-# Feature effects
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-
-#--- DALEX
-#     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Shovel",
-                         colorize = FALSE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("BroadBurn", "isi", "CROWN_CLOS", "HistoricFires", "DebrisMade")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-#################################### Categorical response variable
-#--- Step 1: Define a task
-task = TaskClassifST$new("Shovel",
-                       backend = Shovel_sf_cat, 
-                       target = "dNBRCAT")
-
-#--- Step 2: Define a learner
-# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("classif.ranger", 
-              num.trees = 1000,
-              importance = "permutation",
-              respect.unordered.factors = "order",
-              predict_type = "response")
-
-#--- Step 3: Model validation
-# lists different performance measures https://mlr3.mlr-org.com/reference/mlr_measures.html 
-resampling <- rsmp("bootstrap", ratio=0.8, repeats=30)
-rr <- mlr3::resample(task = task, learner = learner, resampling = resampling,
-                     store_models = TRUE, store_backends = FALSE)
-rr$aggregate(msr("classif.ce")) # classification error
-rr$score(msr("classif.ce")) 
-#rr$aggregate(msr("oob_error")) # out-of-bag-error
-rr$prediction()$score(msr("classif.ce")) # global R2 (R2 over every data point predicted during CV)
-
-#--- Step 4: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-
-
-#--- Step 5: Feature selection
-resampling = rsmp("spcv_coords") 
-measure = msr("classif.ce")
-terminator = trm("evals", n_evals=20)
-
-instance = FSelectInstanceSingleCrit$new(
-  task = task,
-  learner = learner,
-  resampling = resampling,
-  measure = measure, 
-  terminator = terminator
-)
-
-fselector = fs("random_search")
-fselector$optimize(instance)
-instance$result_feature_set
-
-
-#--- Step 5: Subset task with selected features
-task$select(instance$result_feature_set) # subsets task, so need to reread original if want to use
-
-
-#--- Step 6: Tuned model validation
-resampling <- rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rrFlt <- mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rrFlt$aggregate(msr("classif.ce")) # fold
-rrFlt$prediction()$score(msr("classif.ce")) # global
-
-
-
-#--- Step 7: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.34
-
-#--- Step 8: Model interpretation
-#--- using IML package
-#data = as.data.frame(Chutanli_sf) # IML package can't handle sf objects
-#x = data[,which(names(data) != c("dNBR","geometry","V1"))]
-dat <- as.data.table(Shovel_sf_cat)
-x <- dat[,-c("dNBRCAT","geometry")]
-#x <- as.data.frame(x)
-#dat <- as.data.frame(dat)
-model <- Predictor$new(learner, data = x, y = dat$dNBRCAT)
-
-# Feature Effects - ale plots
-#      computes the effects for all given features on the model prediction
-#      ale plots > pdp plots because they still work when features are correlated
-effect <- FeatureEffects$new(model, method = "ale") # accumulated local effects 
-plot(effect)
-
-# or look at partial dependance plots
-effect <- FeatureEffects$new(model, method = "pdp") # partial dependance plots
-plot(effect)
-
-# Shapley
-#      computes feature contributions for single predictions with the Shapley value
-#      Given the current set of feature values, the contribution of a feature value to the difference between the actual              prediction and the mean prediction is the estimated Shapley value
-x.interest <- data.frame(x[1,])  
-shapley <- Shapley$new(model, x.interest = x.interest)
-plot(shapley) # phi gives increase or decrease in probability given the values on vertical axis
-
-# Feature Imp
-#       Level of importance of the features
-# I input the below variables before I did the variable permutation filter - so will likely have to change these as some of these variables were removed from the task in step 5
-#num_features = c("DOBrounded", "PlantAge", "BASAL_AREA", "CROWN_CLOS", "PineCov", "SpruceCov", "BroadBurn", "Brushed")
-effect.imp <- FeatureImp$new(model, loss = "ce") # mean absolute error
-effect.imp$plot(features = features)
-
-# Independent test data
-train_set = sample(task$nrow, 0.8 * task$nrow) # train on 80% of data
-test_set = setdiff(seq_len(task$nrow), train_set)
-learner$train(task, row_ids = train_set)
-prediction = learner$predict(task, row_ids = test_set)
-
-# plot on training
-
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBRCAT")
-effect = FeatureImp$new(model, loss = "ce")
-plot_train = plot(effect, features = num_features)
-
-# plot on test data
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBRCAT")
-effect = FeatureImp$new(model, loss = "ce")
-plot_test = plot(effect, features = num_features)
-
-# combine into single plot
-plot_train + plot_test
-
-# Feature effects
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBRCAT")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBRCAT")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-
-#--- DALEX
-# similar to IML package
-#     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(dat$dNBRCAT),
-                         label = "Chutanli - cat",
-                         colorize = FALSE,
-                         type = "classification")
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi <- model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-```
-
-# Verdun
-Train a ranger model then do model interpretation
-```{r Verdun, echo=FALSE}
-rm(learner, rr, rrFlt)
-
-#--- Step 1: Define a task
-task = TaskRegrST$new("Verdun",
-                       backend = Verdun_sf, 
-                       target = "dNBR")
-
-
-#--- Step 2: Define a learner
-# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("regr.ranger", 
-              num.trees = 1000,
-              importance = "permutation",
-              respect.unordered.factors = "order",
-              predict_type = "response")
-
-
-#--- Step 3: Model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rr = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rr$aggregate(msr("regr.rsq")) # by fold R2 (avg. perforamance over all k fold from CV)
-rr$prediction()$score(msr("regr.rsq")) # global R2 (R2 over every data point predicted during CV)
-# fold R2 = -0.070
-# global R2 = 0.088
-
-
-#--- Step 4: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.45
-
-
-#--- Step 5: Feature selection
-resampling = rsmp("spcv_coords") 
-measure = msr("regr.rsq")
-terminator = trm("evals", n_evals=20)
-
-instance = FSelectInstanceSingleCrit$new(
-  task = task,
-  learner = learner,
-  resampling = resampling,
-  measure = measure, 
-  terminator = terminator
-)
-
-fselector = fs("random_search")
-fselector$optimize(instance)
-instance$result_feature_set
-
-
-#--- Step 5: Subset task with selected features
-task$select(instance$result_feature_set) # this still subsets task, so need to reread original task if want to use it after this
-
-
-#--- Step 6: Tuned model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rrFlt = resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rrFlt$aggregate(msr("regr.rsq")) # fold
-rrFlt$prediction()$score(msr("regr.rsq")) # global
-# fold R2 = 0.028
-# global R2 = 0.13
-
-
-#--- Step 7: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.46
-
-
-#--- Step 8: Model interpretation
-#--- IML
-dat = as.data.table(Verdun_sf)
-x <- dat[,-c("dNBR","geometry")]
-model = Predictor$new(learner, data = x, y = dat$dNBR)
-
-# Feature Effects - ale plots
-#      computes the effects for all given features on the model prediction
-#      ale plots > pdp plots because they still work when features are correlated
-effect = FeatureEffects$new(model, method = "ale") # accumulated local effects
-plot(effect)
-
-# Shapley
-#      computes feature contributions for single predictions with the Shapley value
-#      Given the current set of feature values, the contribution of a feature value to the difference between the actual              prediction and the mean prediction is the estimated Shapley value
-x.interest = data.frame(x[1,])  
-shapley = Shapley$new(model, x.interest = x.interest)
-plot(shapley) # phi gives increase or decrease in probability given the values on vertical axis
-
-# Feature Imp
-#       Level of importance of the features
-num_features = c("DOBrounded", "PlantAge", "BASAL_AREA", "CROWN_CLOS", "PineCov", "SpruceCov", "BroadBurn", "Brushed")
-effect.imp = FeatureImp$new(model, loss = "mae") # mean absolute error
-effect.imp$plot(features = num_features)
-
-# Independent test data
-train_set = sample(task$nrow, 0.8 * task$nrow)
-test_set = setdiff(seq_len(task$nrow), train_set)
-learner$train(task, row_ids = train_set)
-prediction = learner$predict(task, row_ids = test_set)
-
-# plot on training
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_train = plot(effect, features = num_features)
-
-# plot on test data
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_test = plot(effect, features = num_features)
-
-# combine into single plot
-plot_train + plot_test
-
-# Feature effects
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-
-#--- DALEX
-#     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Verdun",
-                         colorize = FALSE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-```
-
-# Island
-Train a ranger model then do model interpretation
-```{r Island, echo=FALSE}
-rm(learner, rr, rrFlt)
-
-#--- Step 1: Define a task
-task = TaskRegrST$new("Island",
-                       backend = Island_sf, 
-                       target = "dNBR")
-
-
-#--- Step 2: Define a learner
-# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("regr.ranger", 
-              num.trees = 1000,
-              importance = "permutation",
-              respect.unordered.factors = "order",
-              predict_type = "response")
-
-
-#--- Step 3: Model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rr = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rr$aggregate(msr("regr.rsq")) # by fold R2 (avg. perforamance over all k fold from CV)
-rr$prediction()$score(msr("regr.rsq")) # global R2 (R2 over every data point predicted during CV)
-# fold R2 = 0.24
-# global R2 = 0.31
-
-
-#--- Step 4: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.45
-
-
-#--- Step 5: Feature selection
-resampling = rsmp("spcv_coords") 
-measure = msr("regr.rsq")
-terminator = trm("evals", n_evals=20)
-
-instance = FSelectInstanceSingleCrit$new(
-  task = task,
-  learner = learner,
-  resampling = resampling,
-  measure = measure, 
-  terminator = terminator
-)
-
-fselector = fs("random_search")
-fselector$optimize(instance)
-instance$result_feature_set
-
-
-#--- Step 5: Subset task with selected features
-task$select(instance$result_feature_set) # this subsets task, so need to reread original task if want to use it after this
-
-
-#--- Step 6: Tuned model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rrFlt = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rrFlt$aggregate(msr("regr.rsq")) # fold
-rrFlt$prediction()$score(msr("regr.rsq")) # global
-# fold R2 = 0.26
-# global R2 = 0.31
-
-
-#--- Step 7: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.46
-
-
-#--- Step 8: Model interpretation
-#--- IML
-dat = as.data.table(Island_sf)
-x = dat[, -c("dNBR","geometry")]
-model = Predictor$new(learner, data = x, y = dat$dNBR)
-
-
-# Feature Effects - ale plots
-#      computes the effects for all given features on the model prediction
-#      ale plots > pdp plots because they still work when features are correlated
-effect = FeatureEffects$new(model, method = "ale") # accumulated local effects
-plot(effect)
-
-# Shapley
-#      computes feature contributions for single predictions with the Shapley value
-#      Given the current set of feature values, the contribution of a feature value to the difference between the actual              prediction and the mean prediction is the estimated Shapley value
-x.interest = data.frame(x[1,])  
-shapley = Shapley$new(model, x.interest = x.interest)
-plot(shapley) # phi gives increase or decrease in probability given the values on vertical axis
-
-# Feature Imp
-#       Level of importance of the features
-num_features = c("DOBrounded", "PlantAge", "BASAL_AREA", "CROWN_CLOS", "PineCov", "SpruceCov", "BroadBurn", "Brushed")
-effect.imp = FeatureImp$new(model, loss = "mae") # mean absolute error
-effect.imp$plot(features = num_features)
-
-# Independent test data
-train_set = sample(task$nrow, 0.8 * task$nrow)
-test_set = setdiff(seq_len(task$nrow), train_set)
-learner$train(task, row_ids = train_set)
-prediction = learner$predict(task, row_ids = test_set)
-
-# plot on training
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_train = plot(effect, features = num_features)
-
-# plot on test data
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_test = plot(effect, features = num_features)
-
-# combine into single plot
-plot_train + plot_test
-
-# Feature effects
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-
-#--- DALEX
-#     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Island",
-                         colorize = FALSE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-```
-
-# Nadina
-Train a ranger model then do model interpretation
-```{r Nadina, echo=FALSE}
-rm(learner, rr)
-
-#--- Step 1: Define a task
-task = TaskRegrST$new("Nadina",
-                       backend = Nadina_sf_con, 
-                       target = "dNBR")
-
-
-#--- Step 2: Define a learner
-# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("regr.ranger", 
-              num.trees = 1000,
-              importance = "permutation",
-              respect.unordered.factors = "order",
-              predict_type = "response",
-              num.threads=20)
-
-
-#--- Step 3: Model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rr = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rr$aggregate(msr("regr.rsq")) # by fold R2 (avg. perforamance over all k fold from CV)
-rr$prediction()$score(msr("regr.rsq")) # global R2 (R2 over every data point predicted during CV)
-# fold R2 = 0.16
-# global R2 = 0.23
-
-
-#--- Step 4: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.57
-
-
-#--- Step 5: Feature selection
-resampling = rsmp("spcv_coords") 
-measure = msr("regr.rsq")
-terminator = trm("evals", n_evals=20)
-
-instance = FSelectInstanceSingleCrit$new(
-  task = task,
-  learner = learner,
-  resampling = resampling,
-  measure = measure, 
-  terminator = terminator
-)
-
-fselector = fs("random_search")
-fselector$optimize(instance)
-instance$result_feature_set
-
-
-#--- Step 5: Subset task with selected features
-task$select(instance$result_feature_set) # this still subsets task, so need to reread original task if want to use it after this
-
-
-#--- Step 6: Tuned model validation
-resampling = rsmp("repeated_spcv_coords", folds=10, repeats=2)
-rrFlt = mlr3::resample(task, learner, resampling, store_models = TRUE, store_backends = FALSE)
-rrFlt$aggregate(msr("regr.rsq")) # fold
-rrFlt$prediction()$score(msr("regr.rsq")) # global
-# fold R2 = 0.19
-# global R2 = 0.26
-
-
-#--- Step 7: Train learner
-learner$train(task)
-learner$model # R2 on fully trained model
-#R2oob = 0.54
-
-
-#--- Step 8: Model interpretation
-#--- IML
-dat = as.data.table(Nadina_sf_con)
-x = dat[,-c("dNBR","geometry")] 
-model = Predictor$new(learner, data = x, y = dat$dNBR)
-
-# Feature Effects - ale plots
-#      computes the effects for all given features on the model prediction
-#      ale plots > pdp plots because they still work when features are correlated
-effect = FeatureEffects$new(model, method = "ale") # accumulated local effects
-plot(effect)
-
-# Shapley
-#      computes feature contributions for single predictions with the Shapley value
-#      Given the current set of feature values, the contribution of a feature value to the difference between the actual              prediction and the mean prediction is the estimated Shapley value
-x.interest = data.frame(x[1,])  
-shapley = Shapley$new(model, x.interest = x.interest)
-plot(shapley) # phi gives increase or decrease in probability given the values on vertical axis
-
-# Feature Imp
-#       Level of importance of the features
-num_features = c("DOBrounded", "PlantAge", "BASAL_AREA", "CROWN_CLOS", "PineCov", "SpruceCov", "BroadBurn", "Brushed")
-effect.imp = FeatureImp$new(model, loss = "mae") # mean absolute error
-effect.imp$plot(features = num_features)
-
-# Independent test data
-train_set = sample(task$nrow, 0.8 * task$nrow)
-test_set = setdiff(seq_len(task$nrow), train_set)
-learner$train(task, row_ids = train_set)
-prediction = learner$predict(task, row_ids = test_set)
-
-# plot on training
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_train = plot(effect, features = num_features)
-
-# plot on test data
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model, loss = "mae")
-plot_test = plot(effect, features = num_features)
-
-# combine into single plot
-plot_train + plot_test
-
-# Feature effects
-model = Predictor$new(learner, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-model = Predictor$new(learner, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureEffects$new(model)
-plot(effect)#, features = num_features)
-
-
-#--- DALEX
-#     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Nadina",
-                         colorize = FALSE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
 
 ```
