@@ -312,6 +312,7 @@ Test_Conf <- list()
 TrainImp_dat <- list()
 RF_scores <- list()
 pd_scores <- list()
+effects <- list()
 NumCores <- 20
 
 for(i in 1:length(task_names)){
@@ -324,7 +325,7 @@ for(i in 1:length(task_names)){
   learner = lrn("classif.ranger",
                 importance = "permutation",
                 respect.unordered.factors = "order",
-                predict_type = "prob",
+                predict_type = "response",
                 num.threads=NumCores)
   
   #--- Step 3: Split stratified task into test/train data
@@ -336,10 +337,10 @@ for(i in 1:length(task_names)){
   #--- Step 4: Feature selection (using nested resampling)
   measure = msr("classif.ce") #classification error
   fselector = fs("random_search") # using random_search b/c of large search space
-  level = 0.2 
-  terminator = trm("perf_reached", level=level)
-  #terminator = trm("stagnation", iters=20, threshold=0)
-  #terminator = trm("evals", n_evals=20)
+  #level = 0.2 
+  #terminator = trm("perf_reached", level=level)
+  #terminator = trm("stagnation", iters=40, threshold=0)
+  terminator = trm("evals", n_evals=20)
   inner_resampling = rsmp("spcv_coords", folds=5)
    
   optFtlrn = AutoFSelector$new(
@@ -400,13 +401,18 @@ for(i in 1:length(task_names)){
   #dat_test <- task_test$data()
   
   #impFt <- TrainImp_dat[[i]]$Feature
-  #model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
+  model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
   #effect.imp <- FeatureImp$new(model, loss = "ce")
   #effect.imp$plot(features = impFt)
+  
+  effects[[i]] <- FeatureEffects$new(model)
+  #plot(effects)
+  #optFtlrn$predict_type <- "response"
   model_exp = explain_mlr3(optFtlrn,
                          data = x_train, # provide data without y 
                          y = dat_train$dNBRCAT,
-                         colorize = FALSE)
+                         colorize = FALSE,
+                         type="classification")
 
   # Partial dependence plots of top variables
   pd_scores[[i]] <- model_profile(model_exp)$agr_profiles
@@ -445,11 +451,52 @@ ggplot(Silv_Imp_dt, aes(x = Score, y = reorder(Variable,Score))) +
   xlab("") +
   xlim(c(-0.01,0.2))+
   ylab("Variable Importance")
-  
-plot(pd) +
-    scale_y_continuous("Estimated dNBR") +
+
+pd_scores[[1]][,FireID := task_names[1]]
+pd_scores[[2]][,FireID := task_names[2]]
+pd_scores[[3]][,FireID := task_names[3]]
+pd_scores[[4]][,FireID := task_names[4]]
+pd_scores[[5]][,FireID := task_names[5]]
+pd_scores[[6]][,FireID := task_names[6]]
+pd_scores_dt <- rbindlist(pd_scores)
+
+num_features <- c("PlantAge")
+
+plot(effects[[1]], features = num_features) 
+    #scale_y_continuous("Estimated dNBR") +
     ggtitle("Partial Dependence profiles for selected variables")
 
+plot(effects[[1]]$results$PlantAge$.value ~ effects[[1]]$results$PlantAge$.borders)
+
+
+ggplot(effects[[1]]$results$PlantAge)+
+  geom_line(aes(x=.borders, y=.value, colour = .class), size=2)
+
+PD_plantAge <- list() 
+for(i in 1:length(effects)){
+  PD_plantAge[[i]] <- data.table(effects[[i]]$results$PlantAge)[,FireID := task_names[i]]
+}
+PD_plantAge_dt <- rbindlist(PD_plantAge)
+
+ggplot(PD_plantAge_dt)+
+  geom_line(aes(x=.borders, y=.value, colour = FireID), size=1.5)+
+  facet_wrap(".class")
+
+PD_CrownClos <- list() 
+for(i in 1:length(effects)){
+  PD_CrownClos[[i]] <- data.table(effects[[i]]$results$CROWN_CLOS)[,FireID := task_names[i]]
+}
+PD_CrownClos_dt <- rbindlist(PD_CrownClos)
+
+ggplot(PD_CrownClos_dt)+
+  geom_line(aes(x=.borders, y=.value, colour = FireID), size=1.5)+
+  facet_wrap(".class")
+
+
+plot(pd_scores[[1]], variables = num_features) +
+    #scale_y_continuous("Estimated dNBR") +
+    ggtitle("Partial Dependence profiles for selected variables")
+plot(pd_scores[[1]], pd_scores[[2]], variables=num_features, color="_label_")
 ```
 
 
