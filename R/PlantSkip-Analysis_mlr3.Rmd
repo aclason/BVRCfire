@@ -25,9 +25,9 @@ Step 9: Visualize
 knitr::opts_chunk$set(echo = TRUE)
 
 #------------------------------ Load libraries---------------------------------#
-ls <- c("tidyverse", "data.table", "magrittr") # Data Management and Manipulation
+ls <- c("tidyverse", "data.table", "magrittr") # Data Management and Manipul,ation
 ls <- append(ls, c("raster")) # geo comp.,
-ls <- append(ls, c("pdp", "mlr3", "mlr3spatiotempcv", "mlr3verse")) # analysis
+ls <- append(ls, c("pdp", "mlr3", "mlr3spatiotempcv", "mlr3verse", "vegan")) # analysis
 ls <- append(ls, c("iml", "patchwork", "DALEX", "DALEXtra")) # model interpretation/visualization
 
 # Install if needed -- then load. 
@@ -293,13 +293,6 @@ Nadina_sf_cat <- sf::st_as_sf(Nadina[,-c("dNBR")], coords = c("x", "y"))
 
 
 
-```{r PCNM, echo=FALSE, eval=FALSE}
-
-
-
-```
-
-
 
 # Chutanli
 ```{r Chutanli, echo=FALSE}
@@ -307,6 +300,19 @@ Nadina_sf_cat <- sf::st_as_sf(Nadina[,-c("dNBR")], coords = c("x", "y"))
 
 ################################################################################
 #################################### Categorical response variable
+
+# Correlation
+datCon_list <- Chutanli_sf_con
+dat <- as.data.table(datCon_list)
+dat <- dat %>% select_if(is.numeric)
+corrMat <- round(cor(dat, method="spearman"), 2)
+
+corrplot(corrMat)
+# 0.7 cutoff
+corr <- as.data.frame(corrMat)
+corr[abs(corr) < .7 & abs(corr) < 1] <- ""
+corr
+
 #--- Step 1: Define a task
 # dat <- as.data.table(Chutanli_sf_cat)
 # dat <- dat[,-c("geometry")]
@@ -315,12 +321,6 @@ Nadina_sf_cat <- sf::st_as_sf(Nadina[,-c("dNBR")], coords = c("x", "y"))
 #Chutanli_sf_cat <- dplyr::select(Chutanli_sf_cat, - PlantAge)
 set.seed(456)
 
-
-Chut_dat <- as.data.table(Chutanli_sf_cat)
-Chut_corMat <- cor(Chut_dat[,!c("dNBRCAT","BEC","BroadBurn","Brushed", "DebrisPiled", "Fertil", "PileBurn",
-                                "Soil","Spaced","geometry")])
-
-#interestingly, plantation age isn't correlated with other variables. fire weather might need a re-think
 
 task = TaskClassifST$new("Chutanli",
                        backend = Chutanli_sf_cat, #dat, 
@@ -342,11 +342,10 @@ task_test = task$clone()$filter(rows=split$test)
 
 #--- Step 4: Feature selection (using nested resampling)
 measure = msr("classif.ce") #classification error
-fselector = fs("random_search") # using random_search b/c of large search space
+fselector = fs("random_search", batch_size=15) # using random_search b/c of large search space
 
 level = 0.5 #0.1 # Alana try 0.1
-terminator = trm("stagnation", iters=20, threshold=0)
-#terminator = trm("perf_reached", level=level)#fselector stops after model measure is within 10% of best model
+terminator = trm("perf_reached", level=level) #fselector stops after model measure is within 10% of best model
 # doesn't seem to terminate with level <0.5, anything higher and terminates right after 1 evaluation... but not sure what this means? unstable model? .. but maybe on Alana's computer it actually terminates in a reasonable time
 inner_resampling = rsmp("spcv_coords", folds=5)
  
@@ -487,17 +486,46 @@ Alana - making a loop to run through each fire and extract results
 ```{r}
 set.seed(456)
 
+#--- Assess correlated covariates
 task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
 dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat, Island_sf_cat,
                  Verdun_sf_cat, Tezzeron_sf_cat)
+
+datCon_list <- list(Chutanli_sf_con, Nadina_sf_con, Shovel_sf_con, Island_sf_con,
+                 Verdun_sf_con, Tezzeron_sf_con)
+
+plot <- list()
+corrT <- list()
+
+for(i in 1:length(task_names)){
+  dat <- as.data.table(datCon_list[[i]])
+  dat <- dat %>% select_if(is.numeric)
+  
+  corrMat <- round(cor(dat, method="spearman"), 2)
+
+  plot[[i]] <- corrplot(corrMat, 
+                        title = paste0(task_names[i]))
+  # 0.7 cutoff
+  corr <- as.data.frame(corrMat)
+  corr[abs(corr) < .7 & abs(corr) < 1] <- ""
+  write.csv(corr, paste0(datPath, task_names[i], "corr.csv"))
+}
+
+
+#--- Run model  
 CV_Conf <- list()
 Test_Conf <- list()
 TrainImp_dat <- list()
 NumCores <- 20
 
 for(i in 1:length(task_names)){
+  # Remove correlated covariates
+  dat <- dat_list[[i]]
+  dat[,c("dob", "bui", "dc", "isi")] <- list(NULL)
+
+  #--- Step 1: Define a task
   task = TaskClassifST$new(task_names[i],
-                         backend = dat_list[[i]], 
+                         backend = dat, 
                          target = "dNBRCAT")
   
   #--- Step 2: Define a learner
@@ -509,7 +537,7 @@ for(i in 1:length(task_names)){
                 num.threads=NumCores)
   
   #--- Step 3: Split stratified task into test/train data
-  split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime? - can use set.seed at begining 
+  split = partition(task, ratio=0.8, stratify=TRUE) 
   
   task_train = task$clone()$filter(rows=split$train)
   task_test = task$clone()$filter(rows=split$test)
@@ -528,41 +556,21 @@ for(i in 1:length(task_names)){
     terminator = terminator,
     fselector = fselector
   )
-  
-  # outer_resampling = rsmp("spcv_coords", folds=5)
-  # autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
-  # 
-  # rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
-  
-  #--- Step 5: Model evaluation
-  # outer folds
-  # rr$score(measure)
-  # # Unbiased performance of model with optimal hyperparameters
-  # rr$aggregate(measure)
-  # 
-  #So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data
-  
-  #--- Step 6: Train final model (applies tuning)
+
+  #--- Step 5: Train final model (applies tuning)
   optFtlrn$train(task_train) #I don't see how the tuning is applied here
   #optFtlrn$model
   
-  #--- Step 7: Predict on test data
+  #--- Step 6: Predict on test data & evaluate model
   optFtlrnPred <- optFtlrn$predict(task_test) 
   optFtlrnPred$score(measure)
-  # 
-  # #cross-validated predictions (only train data)
-  # rr$prediction()
+ 
   #trained model predictions
   optFtlrnPred$prob
   
   #confusion matrix:
-#  CV_Conf[[i]] <- rr$prediction()$confusion
   Test_Conf[[i]] <- optFtlrnPred$confusion
   
-#  rr$score()
-  optFtlrnPred$score()
-  
-#  sum(rr$prediction()$confusion) #so this is on the training data
   sum(optFtlrnPred$confusion) # this is on the test data
   
   #it's good at predicting unburned, there is no high severity here
@@ -584,6 +592,7 @@ for(i in 1:length(task_names)){
   #effect.imp$plot(features = impFt)
 }  
   
+
 
 #CV_Conf
 Test_Conf
