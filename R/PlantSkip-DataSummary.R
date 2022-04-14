@@ -17,48 +17,132 @@ ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "
                    "SpotBurn", "WBurn")
 datPath <- "./Inputs/" #"C:/Users/farne/Documents/"
 
+ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
+                   "OPENING_ID", "PileBurn", "Prune", "Soil", "Spaced", 
+                   "SpotBurn", "WBurn","dNBRCAT")
+datPath <-  "./Inputs/"  #"C:/Users/farne/Documents/" 
+
 Chutanli <- fread(paste0(datPath,"G41607dat270.csv"))
 Chutanli <- Chutanli %>%
   mutate_at((colnames(Chutanli)[colnames(Chutanli) %in% ctg_variables]), factor) %>%
-  dplyr::select(-"V1") #can remove if you remembered to save without row.names
+  dplyr::select(-c("dNBRReSamp")) #can remove if you remembered to save without row.names
 Chutanli[,dNBR := dNBR*1000]
+Chutanli[HistoricFires==0 ,HistoricFires:=100]
+Chutanli_dist <- dist(Chutanli[,.(x,y)], method = "euclidean")
+Chutanli_pcnm <- pcnm(Chutanli_dist)
+Chutanli[, c("PCNM1","PCNM2", "PCNM3",
+             "PCNM4", "PCNM5","PCNM6") := .(Chutanli_pcnm$vectors[,"PCNM1"],
+                                            Chutanli_pcnm$vectors[,"PCNM2"],
+                                            Chutanli_pcnm$vectors[,"PCNM3"],
+                                            Chutanli_pcnm$vectors[,"PCNM4"],
+                                            Chutanli_pcnm$vectors[,"PCNM5"],
+                                            Chutanli_pcnm$vectors[,"PCNM6"])]
 
 Tezzeron <- fread(paste0(datPath,"G51632dat270.csv"))
 Tezzeron <- Tezzeron %>%
   mutate_at((colnames(Tezzeron)[colnames(Tezzeron) %in% ctg_variables]), factor)%>%
-  dplyr::select(-"V1")
+  dplyr::select(-c("dNBRReSamp"))
 Tezzeron[,dNBR := dNBR*1000]
+Tezzeron_dist <- dist(Tezzeron[,.(x,y)], method = "euclidean")
+Tezzeron_pcnm <- pcnm(Tezzeron_dist)
+Tezzeron[, c("PCNM1","PCNM2", "PCNM3",
+             "PCNM4", "PCNM5","PCNM6") := .(Tezzeron_pcnm$vectors[,"PCNM1"],
+                                            Tezzeron_pcnm$vectors[,"PCNM2"],
+                                            Tezzeron_pcnm$vectors[,"PCNM3"],
+                                            Tezzeron_pcnm$vectors[,"PCNM4"],
+                                            Tezzeron_pcnm$vectors[,"PCNM5"],
+                                            Tezzeron_pcnm$vectors[,"PCNM6"])]
 
 Shovel <- fread(paste0(datPath,"R11498dat270.csv"))
 Shovel <- Shovel %>%
   mutate_at((colnames(Shovel)[colnames(Shovel) %in% ctg_variables]), factor)%>%
-  dplyr::select(-"V1")
+  dplyr::select(-c("dNBRReSamp"))
 Shovel[,dNBR := dNBR*1000]
+Shovel[HistoricFires==0 ,HistoricFires:=100]
+Shovel_dist <- dist(Shovel[,.(x,y)], method = "euclidean")
+Shovel_pcnm <- pcnm(Shovel_dist)
+Shovel[, c("PCNM1","PCNM2", "PCNM3",
+           "PCNM4", "PCNM5","PCNM6") := .(Shovel_pcnm$vectors[,"PCNM1"],
+                                          Shovel_pcnm$vectors[,"PCNM2"],
+                                          Shovel_pcnm$vectors[,"PCNM3"],
+                                          Shovel_pcnm$vectors[,"PCNM4"],
+                                          Shovel_pcnm$vectors[,"PCNM5"],
+                                          Shovel_pcnm$vectors[,"PCNM6"])]
 
 Verdun <- fread(paste0(datPath,"R11796dat270.csv"))
 Verdun <- Verdun %>%
   mutate_at((colnames(Verdun)[colnames(Verdun) %in% ctg_variables]), factor)%>%
-  dplyr::select(-"V1")
+  dplyr::select(-c("dNBRReSamp"))
 Verdun[,dNBR := dNBR*1000]
+Verdun[HistoricFires==0 ,HistoricFires:=100]
+Verdun_dist <- dist(Verdun[,.(x,y)], method = "euclidean")
+Verdun_pcnm <- pcnm(Verdun_dist)
+Verdun[, c("PCNM1","PCNM2", "PCNM3",
+           "PCNM4", "PCNM5","PCNM6") := .(Verdun_pcnm$vectors[,"PCNM1"],
+                                          Verdun_pcnm$vectors[,"PCNM2"],
+                                          Verdun_pcnm$vectors[,"PCNM3"],
+                                          Verdun_pcnm$vectors[,"PCNM4"],
+                                          Verdun_pcnm$vectors[,"PCNM5"],
+                                          Verdun_pcnm$vectors[,"PCNM6"])]
 
 Island <- fread(paste0(datPath,"R11921dat270.csv"))
 Island <- Island %>%
   mutate_at((colnames(Island)[colnames(Island) %in% ctg_variables]), factor)%>%
-  dplyr::select(-"V1")
+  dplyr::select(-c("dNBRReSamp"))
 Island[,dNBR := dNBR*1000]
+Island[HistoricFires==0 ,HistoricFires:=100]
+Island_dist <- dist(Island[,.(x,y)], method = "euclidean")
+Island_pcnm <- pcnm(Island_dist)
+Island[, c("PCNM1","PCNM2", "PCNM3",
+           "PCNM4", "PCNM5","PCNM6") := .(Island_pcnm$vectors[,"PCNM1"],
+                                          Island_pcnm$vectors[,"PCNM2"],
+                                          Island_pcnm$vectors[,"PCNM3"],
+                                          Island_pcnm$vectors[,"PCNM4"],
+                                          Island_pcnm$vectors[,"PCNM5"],
+                                          Island_pcnm$vectors[,"PCNM6"])]
 
 Nadina <- fread(paste0(datPath,"R21721dat270.csv"))
 Nadina <- Nadina %>%
   mutate_at((colnames(Nadina)[colnames(Nadina) %in% ctg_variables]), factor)%>%
-  dplyr::select(-"V1")
+  dplyr::select(-c("dNBRReSamp"))
 Nadina[,dNBR := dNBR*1000]
+Nadina[HistoricFires==0 ,HistoricFires:=100]
+Nadina_dist <- dist(Nadina[,.(x,y)], method = "euclidean")
+Nadina_pcnm <- pcnm(Nadina_dist)
+Nadina[, c("PCNM1","PCNM2", "PCNM3",
+           "PCNM4", "PCNM5","PCNM6") := .(Nadina_pcnm$vectors[,"PCNM1"],
+                                          Nadina_pcnm$vectors[,"PCNM2"],
+                                          Nadina_pcnm$vectors[,"PCNM3"],
+                                          Nadina_pcnm$vectors[,"PCNM4"],
+                                          Nadina_pcnm$vectors[,"PCNM5"],
+                                          Nadina_pcnm$vectors[,"PCNM6"])]
 
-Chutanli_sf = sf::st_as_sf(Chutanli, coords = c("x", "y"))
-Tezzeron_sf = sf::st_as_sf(Tezzeron, coords = c("x", "y"))
-Shovel_sf = sf::st_as_sf(Shovel, coords = c("x", "y"))
-Verdun_sf = sf::st_as_sf(Verdun, coords = c("x", "y"))
-Island_sf = sf::st_as_sf(Island, coords = c("x", "y"))
-Nadina_sf = sf::st_as_sf(Nadina, coords = c("x", "y"))
+#ordisurf(Chutanli_xy, scores(Chutanli_pcnm, choices=1), bubble = 4, main = "PCNM 1")
+#plot(Chutanli_pcnm$values) #most the variation is in the first 20 or so eigenvectors
+
+#ggplot()+
+# geom_point(aes(y=Chutanli$dNBR, x= Chutanli_pcnm$vectors[,17]))+
+#geom_smooth(aes(y=Chutanli$dNBR, x= Chutanli_pcnm$vectors[,17]), method="gam")
+
+#create datasets with variables to include in analysis. We are keeping them (cat response and continuous response) as seperate datasets, because it's imbedded in the code below to pass the entire object and not specify which columns to ignore
+Chutanli_sf_con <- sf::st_as_sf(Chutanli[,-c("dNBRCAT")], coords = c("x", "y"))
+Chutanli_sf_cat <- sf::st_as_sf(Chutanli[,-c("dNBR")], coords = c("x", "y"))
+
+Tezzeron_sf_con <- sf::st_as_sf(Tezzeron[,-c("dNBRCAT")], coords = c("x", "y"))
+Tezzeron_sf_cat <- sf::st_as_sf(Tezzeron[,-c("dNBR")], coords = c("x", "y"))
+
+Shovel_sf_con <- sf::st_as_sf(Shovel[,-c("dNBRCAT")], coords = c("x", "y"))
+Shovel_sf_cat <- sf::st_as_sf(Shovel[,-c("dNBR")], coords = c("x", "y"))
+
+Verdun_sf_con <- sf::st_as_sf(Verdun[,-c("dNBRCAT")], coords = c("x", "y"))
+Verdun_sf_cat <- sf::st_as_sf(Verdun[,-c("dNBR")], coords = c("x", "y"))
+
+Island_sf_con <- sf::st_as_sf(Island[,-c("dNBRCAT")], coords = c("x", "y"))
+Island_sf_cat <- sf::st_as_sf(Island[,-c("dNBR")], coords = c("x", "y"))
+
+Nadina_sf_con <- sf::st_as_sf(Nadina[,-c("dNBRCAT")], coords = c("x", "y"))
+Nadina_sf_cat <- sf::st_as_sf(Nadina[,-c("dNBR")], coords = c("x", "y"))
+
 
 #Important covariates in Nadina
 a <- ggplot(Nadina)+
@@ -145,635 +229,6 @@ f <- ggplot(Chutanli)+
 ggarrange(a,b,c,d,e,f)
 
 
-
-####Running some simplified versions of the models to get our heads around the right approach
-
-#--- DALEX
-#simplified:
-dat <- as.data.table(Chutanli_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-task = TaskClassif$new("Chutanli", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Chutanli - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-#simplified:
-dat <- as.data.table(Chutanli_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-#dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-
-task = TaskClassif$new("Chutanli", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Chutanli - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-####continuous
-dat <- as.data.table(Chutanli_sf_con)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBR")]
-
-task = TaskRegr$new("Chutanli", backend = dat, target = "dNBR")
-learner = lrn("regr.ranger")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Chutanli",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-########################################################################################################
-#simplified:
-dat <- as.data.table(Shovel_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-task = TaskClassif$new("Shovel", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Shovel - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-#simplified:
-dat <- as.data.table(Shovel_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-#dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-
-task = TaskClassif$new("Shovel", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Shovel - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-####continuous
-dat <- as.data.table(Shovel_sf_con)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBR")]
-
-task = TaskRegr$new("Shovel", backend = dat, target = "dNBR")
-learner = lrn("regr.ranger")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Shovel",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-########################################################################################################
-#simplified:
-dat <- as.data.table(Nadina_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,"UnburnLow",
-                               ifelse(dNBRCAT==2,"UnburnLow","Burned")))]
-
-task = TaskClassif$new("Nadina", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",
-              predict_type = "prob",
-              num.threads=20)
-learner$train(task)
-
-model = Predictor$new(learner, data = dat, y = "dNBRCAT")
-
-x.interest = data.frame(x[1,])  
-shapley = Shapley$new(model, x.interest = x.interest)
-plot(shapley)
-
-train_set = sample(task$nrow, 0.8 * task$nrow) # train on 80% of data
-test_set = setdiff(seq_len(task$nrow), train_set)
-
-learner$predict_type = "prob"
-# re-fit the model
-learner$train(task, row_ids = train_set)
-# rebuild prediction object
-prediction = learner$predict(task, row_ids = test_set)
-as.data.table(prediction)
-autoplot(prediction)
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(dat$dNBRCAT),
-                         label = "Nadina - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-plot(model_vi, show_boxplots = TRUE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Probability") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-#simplified:
-dat <- as.data.table(Nadina_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-
-task = TaskClassif$new("Nadina", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model = Predictor$new(learner, data = dat, y = "dNBRCAT")
-
-x.interest = data.frame(x[1,])  
-shapley = Shapley$new(model, x.interest = x.interest)
-plot(shapley)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Nadina - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-####continuous
-dat <- as.data.table(Nadina_sf_con)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBR")]
-
-task = TaskRegr$new("Nadina", backend = dat, target = "dNBR")
-learner = lrn("regr.ranger")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Nadina",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-####continuous no plantation age
-dat <- as.data.table(Nadina_sf_con)
-dat <- dat[,-c("PlantAge","geometry")]
-x <- dat[,-c("dNBR")]
-
-task = TaskRegr$new("Nadina", backend = dat, target = "dNBR")
-learner = lrn("regr.ranger")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Nadina",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-########################################################################################################
-
-#simplified:
-dat <- as.data.table(Verdun_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-task = TaskClassif$new("Verdun", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Verdun - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-#simplified:
-dat <- as.data.table(Verdun_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-#dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-
-task = TaskClassif$new("Verdun", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Verdun - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-####continuous
-dat <- as.data.table(Verdun_sf_con)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBR")]
-
-task = TaskRegr$new("Verdun", backend = dat, target = "dNBR")
-learner = lrn("regr.ranger")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Verdun",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-########################################################################################################
-
-#simplified:
-dat <- as.data.table(Island_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-task = TaskClassif$new("Island", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Island - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-#simplified:
-dat <- as.data.table(Island_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-#dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-
-task = TaskClassif$new("Island", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Island - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-####continuous
-dat <- as.data.table(Island_sf_con)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBR")]
-
-task = TaskRegr$new("Island", backend = dat, target = "dNBR")
-learner = lrn("regr.ranger")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Island",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-########################################################################################################
-
-#simplified:
-dat <- as.data.table(Tezzeron_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-task = TaskClassif$new("Tezzeron", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Tezzeron - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-#simplified:
-dat <- as.data.table(Tezzeron_sf_cat)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBRCAT")]
-#dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-
-
-task = TaskClassif$new("Tezzeron", backend = dat, target = "dNBRCAT")
-learner = lrn("classif.ranger",predict_type = "prob")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = as.numeric(as.character(dat$dNBRCAT)),
-                         label = "Tezzeron - cat",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-
-####continuous
-dat <- as.data.table(Tezzeron_sf_con)
-dat <- dat[,-c("geometry")]
-x <- dat[,-c("dNBR")]
-
-task = TaskRegr$new("Tezzeron", backend = dat, target = "dNBR")
-learner = lrn("regr.ranger")
-learner$train(task)
-
-model_exp = explain_mlr3(learner,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Tezzeron",
-                         colorize = FALSE,
-                         verbose=TRUE)
-
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-selected_variables =c("PlantAge", "PineCov", "CROWN_CLOS", "BASAL_AREA", "SpruceCov", "conifCov", "decidCov", "Brushed")
-pd = model_profile(model_exp, 
-                   variables = selected_variables)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-########################################################################################################
 
 ########################################################################################################
 

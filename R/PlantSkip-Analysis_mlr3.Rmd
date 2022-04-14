@@ -27,7 +27,9 @@ knitr::opts_chunk$set(echo = TRUE)
 #------------------------------ Load libraries---------------------------------#
 ls <- c("tidyverse", "data.table", "magrittr") # Data Management and Manipul,ation
 ls <- append(ls, c("raster")) # geo comp.,
+
 ls <- append(ls, c("pdp", "mlr3", "mlr3spatiotempcv", "mlr3verse", "vegan")) # analysis
+
 ls <- append(ls, c("iml", "patchwork", "DALEX", "DALEXtra")) # model interpretation/visualization
 
 # Install if needed -- then load. 
@@ -171,13 +173,14 @@ Load data as sf object
 ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
                    "OPENING_ID", "PileBurn", "Prune", "Soil", "Spaced", 
                    "SpotBurn", "WBurn","dNBRCAT")
-datPath <-  "C:/Users/farne/Documents/" #"./Inputs/"  
+datPath <-  "./Inputs/"  #"C:/Users/farne/Documents/" 
 
 Chutanli <- fread(paste0(datPath,"G41607dat270.csv"))
 Chutanli <- Chutanli %>%
   mutate_at((colnames(Chutanli)[colnames(Chutanli) %in% ctg_variables]), factor) %>%
-  dplyr::select(-c("dNBRReSamp","HistoricFires")) #can remove if you remembered to save without row.names
+  dplyr::select(-c("dNBRReSamp")) #can remove if you remembered to save without row.names
 Chutanli[,dNBR := dNBR*1000]
+Chutanli[HistoricFires==0 ,HistoricFires:=100]
 Chutanli_dist <- dist(Chutanli[,.(x,y)], method = "euclidean")
 Chutanli_pcnm <- pcnm(Chutanli_dist)
 Chutanli[, c("PCNM1","PCNM2", "PCNM3",
@@ -206,8 +209,9 @@ Tezzeron[, c("PCNM1","PCNM2", "PCNM3",
 Shovel <- fread(paste0(datPath,"R11498dat270.csv"))
 Shovel <- Shovel %>%
   mutate_at((colnames(Shovel)[colnames(Shovel) %in% ctg_variables]), factor)%>%
-  dplyr::select(-c("dNBRReSamp","HistoricFires"))
+  dplyr::select(-c("dNBRReSamp"))
 Shovel[,dNBR := dNBR*1000]
+Shovel[HistoricFires==0 ,HistoricFires:=100]
 Shovel_dist <- dist(Shovel[,.(x,y)], method = "euclidean")
 Shovel_pcnm <- pcnm(Shovel_dist)
 Shovel[, c("PCNM1","PCNM2", "PCNM3",
@@ -221,8 +225,9 @@ Shovel[, c("PCNM1","PCNM2", "PCNM3",
 Verdun <- fread(paste0(datPath,"R11796dat270.csv"))
 Verdun <- Verdun %>%
   mutate_at((colnames(Verdun)[colnames(Verdun) %in% ctg_variables]), factor)%>%
-  dplyr::select(-c("dNBRReSamp","HistoricFires"))
+  dplyr::select(-c("dNBRReSamp"))
 Verdun[,dNBR := dNBR*1000]
+Verdun[HistoricFires==0 ,HistoricFires:=100]
 Verdun_dist <- dist(Verdun[,.(x,y)], method = "euclidean")
 Verdun_pcnm <- pcnm(Verdun_dist)
 Verdun[, c("PCNM1","PCNM2", "PCNM3",
@@ -236,8 +241,9 @@ Verdun[, c("PCNM1","PCNM2", "PCNM3",
 Island <- fread(paste0(datPath,"R11921dat270.csv"))
 Island <- Island %>%
   mutate_at((colnames(Island)[colnames(Island) %in% ctg_variables]), factor)%>%
-  dplyr::select(-c("dNBRReSamp","HistoricFires"))
+  dplyr::select(-c("dNBRReSamp"))
 Island[,dNBR := dNBR*1000]
+Island[HistoricFires==0 ,HistoricFires:=100]
 Island_dist <- dist(Island[,.(x,y)], method = "euclidean")
 Island_pcnm <- pcnm(Island_dist)
 Island[, c("PCNM1","PCNM2", "PCNM3",
@@ -251,8 +257,9 @@ Island[, c("PCNM1","PCNM2", "PCNM3",
 Nadina <- fread(paste0(datPath,"R21721dat270.csv"))
 Nadina <- Nadina %>%
   mutate_at((colnames(Nadina)[colnames(Nadina) %in% ctg_variables]), factor)%>%
-  dplyr::select(-c("dNBRReSamp","HistoricFires"))
+  dplyr::select(-c("dNBRReSamp"))
 Nadina[,dNBR := dNBR*1000]
+Nadina[HistoricFires==0 ,HistoricFires:=100]
 Nadina_dist <- dist(Nadina[,.(x,y)], method = "euclidean")
 Nadina_pcnm <- pcnm(Nadina_dist)
 Nadina[, c("PCNM1","PCNM2", "PCNM3",
@@ -292,6 +299,207 @@ Nadina_sf_cat <- sf::st_as_sf(Nadina[,-c("dNBR")], coords = c("x", "y"))
 ```
 
 
+Alana - making a loop to run through each fire and extract results
+
+
+I just moved this directly after the data cleaning to make this the spot we modify RF
+```{r}
+set.seed(456)
+
+task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
+dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat, Island_sf_cat,
+                 Verdun_sf_cat, Tezzeron_sf_cat)
+#CV_Conf <- list()
+Test_Conf <- list()
+TrainImp_dat <- list()
+RF_scores <- list()
+pd_scores <- list()
+effects <- list()
+NumCores <- 20
+
+for(i in 1:length(task_names)){
+  task = TaskClassifST$new(task_names[i],
+                         backend = dat_list[[i]], 
+                         target = "dNBRCAT")
+  
+  #--- Step 2: Define a learner
+  # default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
+  learner = lrn("classif.ranger",
+                importance = "permutation",
+                respect.unordered.factors = "order",
+                predict_type = "response",
+                num.threads=NumCores)
+  
+  #--- Step 3: Split stratified task into test/train data
+  split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime? - can use set.seed at begining 
+  
+  task_train = task$clone()$filter(rows=split$train)
+  task_test = task$clone()$filter(rows=split$test)
+  
+  #--- Step 4: Feature selection (using nested resampling)
+  measure = msr("classif.ce") #classification error
+  fselector = fs("random_search") # using random_search b/c of large search space
+  #level = 0.2 
+  #terminator = trm("perf_reached", level=level)
+  #terminator = trm("stagnation", iters=40, threshold=0)
+  terminator = trm("evals", n_evals=20)
+  inner_resampling = rsmp("spcv_coords", folds=5)
+   
+  optFtlrn = AutoFSelector$new(
+    learner = learner,
+    resampling = inner_resampling,
+    measure = measure,
+    terminator = terminator,
+    fselector = fselector
+  )
+  
+  #outer_resampling = rsmp("spcv_coords", folds=5)
+  #autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
+  
+  #rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
+  
+  #--- Step 5: Model evaluation
+  # outer folds
+  #rr$score(measure)
+  # Unbiased performance of model with optimal hyperparameters
+  #rr$aggregate(measure)
+  
+  #So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data
+  
+  #--- Step 6: Train final model (applies tuning)
+  optFtlrn$train(task_train) #I don't see how the tuning is applied here
+  #optFtlrn$model
+  
+  #--- Step 7: Predict on test data
+  optFtlrnPred <- optFtlrn$predict(task_test) 
+  optFtlrnPred$score(measure)
+  
+  #cross-validated predictions (only train data)
+  #rr$prediction()
+  #trained model predictions
+  optFtlrnPred$prob
+  
+  #confusion matrix:
+  #CV_Conf[[i]] <- rr$prediction()$confusion
+  Test_Conf[[i]] <- optFtlrnPred$confusion
+  
+ # rr$score()
+  RF_scores[[i]] <- optFtlrnPred$score()
+  
+  #sum(rr$prediction()$confusion) #so this is on the training data
+  #sum(optFtlrnPred$confusion) # this is on the test data
+  
+  #it's good at predicting unburned, there is no high severity here
+  
+  #--- Step 8: Model visualization
+  # Feature importance
+  TrainImp_dat[[i]] <- as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
+  
+  # Feature Imp
+  #       Level of importance of the features
+  #AC: I think we need to pass just the training data?
+  dat_train <- task_train$data()
+  x_train <- dat_train[,-c("dNBRCAT")]
+  #dat_test <- task_test$data()
+  
+  #impFt <- TrainImp_dat[[i]]$Feature
+  model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
+  #effect.imp <- FeatureImp$new(model, loss = "ce")
+  #effect.imp$plot(features = impFt)
+  
+  effects[[i]] <- FeatureEffects$new(model)
+  #plot(effects)
+  #optFtlrn$predict_type <- "response"
+  model_exp = explain_mlr3(optFtlrn,
+                         data = x_train, # provide data without y 
+                         y = dat_train$dNBRCAT,
+                         colorize = FALSE,
+                         type="classification")
+
+  # Partial dependence plots of top variables
+  pd_scores[[i]] <- model_profile(model_exp)$agr_profiles
+  
+}  
+  
+RF_scores
+Test_Conf
+
+#my attempt to make that multi-fire graph:
+TrainImp_dat[[1]][,FireID := task_names[1]]
+TrainImp_dat[[2]][,FireID := task_names[2]]
+TrainImp_dat[[3]][,FireID := task_names[3]]
+TrainImp_dat[[4]][,FireID := task_names[4]]
+TrainImp_dat[[5]][,FireID := task_names[5]]
+TrainImp_dat[[6]][,FireID := task_names[6]]
+TrainImp_dt <- rbindlist(TrainImp_dat)
+setnames(TrainImp_dt, c("Variable","Score","FireID"))
+
+#ggplot(TrainImp_dt, aes(x = reorder(V1, V2), y = V2)) +
+ggplot(TrainImp_dt, aes(x = Score, y = reorder(Variable,Score))) +  
+  geom_point(aes(colour=FireID), size=2) +
+  xlab("")
+
+ggplot(TrainImp_dt, aes(x = Score, y = reorder(Variable,Score))) +  
+  geom_point(aes(colour=FireID), size=2) +
+  facet_wrap("FireID")+
+  xlab("")
+
+Silvic_Vars <- c("BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "PileBurn", 
+                  "Prune", "Soil", "Spaced", "SpotBurn")
+
+Silv_Imp_dt <- TrainImp_dt[Variable %in% Silvic_Vars]
+ggplot(Silv_Imp_dt, aes(x = Score, y = reorder(Variable,Score))) +  
+  geom_point(aes(colour=FireID), size=2) +
+  xlab("") +
+  xlim(c(-0.01,0.2))+
+  ylab("Variable Importance")
+
+pd_scores[[1]][,FireID := task_names[1]]
+pd_scores[[2]][,FireID := task_names[2]]
+pd_scores[[3]][,FireID := task_names[3]]
+pd_scores[[4]][,FireID := task_names[4]]
+pd_scores[[5]][,FireID := task_names[5]]
+pd_scores[[6]][,FireID := task_names[6]]
+pd_scores_dt <- rbindlist(pd_scores)
+
+num_features <- c("PlantAge")
+
+plot(effects[[1]], features = num_features) 
+    #scale_y_continuous("Estimated dNBR") +
+    ggtitle("Partial Dependence profiles for selected variables")
+
+plot(effects[[1]]$results$PlantAge$.value ~ effects[[1]]$results$PlantAge$.borders)
+
+
+ggplot(effects[[1]]$results$PlantAge)+
+  geom_line(aes(x=.borders, y=.value, colour = .class), size=2)
+
+PD_plantAge <- list() 
+for(i in 1:length(effects)){
+  PD_plantAge[[i]] <- data.table(effects[[i]]$results$PlantAge)[,FireID := task_names[i]]
+}
+PD_plantAge_dt <- rbindlist(PD_plantAge)
+
+ggplot(PD_plantAge_dt)+
+  geom_line(aes(x=.borders, y=.value, colour = FireID), size=1.5)+
+  facet_wrap(".class")
+
+PD_CrownClos <- list() 
+for(i in 1:length(effects)){
+  PD_CrownClos[[i]] <- data.table(effects[[i]]$results$CROWN_CLOS)[,FireID := task_names[i]]
+}
+PD_CrownClos_dt <- rbindlist(PD_CrownClos)
+
+ggplot(PD_CrownClos_dt)+
+  geom_line(aes(x=.borders, y=.value, colour = FireID), size=1.5)+
+  facet_wrap(".class")
+
+
+plot(pd_scores[[1]], variables = num_features) +
+    #scale_y_continuous("Estimated dNBR") +
+    ggtitle("Partial Dependence profiles for selected variables")
+plot(pd_scores[[1]], pd_scores[[2]], variables=num_features, color="_label_")
+```
 
 
 # Chutanli
@@ -480,10 +688,9 @@ plot(pd) +
 
 ```
 
-
-
-Alana - making a loop to run through each fire and extract results
+Relationship between plantation age and dNBR (continuous)
 ```{r}
+
 set.seed(456)
 
 #--- Assess correlated covariates
@@ -617,146 +824,6 @@ TrainImp_Alldat <- unique(rbindlist(TrainImp_dat, fill=TRUE), by="V1")
 TrainImp_Alldat <- TrainImp_Alldat$V1
 
 
-```
-
-
-
-Chutanli - continuous
-```{r, echo=FALSE}
-############################ With Plantation age ##############################
-
-############ Continuous response dNBR
-#--- Step 1: Define a task
-task = TaskRegrST$new("Chutanli",
-                       backend = Chutanli_sf_con, 
-                       target = "dNBR")
-
-#--- Step 2: Define a learner
-# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("regr.ranger", 
-              importance = "permutation",
-              respect.unordered.factors = "order",
-              predict_type = "response",
-              num.threads = 20)
-
-#--- Step 3: Split task into training/test datasets
-train_set = sample(task$nrow, 0.8 * task$nrow)
-test_set = setdiff(seq_len(task$nrow), train_set)
-
-task_train = task$clone()$filter(rows=train_set)
-task_test = task$clone()$filter(rows=test_set)
-
-
-#--- Step 4: Feature selection (using nested resampling)
-measure = msr("regr.rsq")
-fselector = fs("random_search") # using random_search b/c of large search space
-terminator = trm("evals", n_evals=20)
-inner_resampling = rsmp("spcv_coords", folds=5)
-  
-optFtlrn = AutoFSelector$new(
-  learner = learner,
-  resampling = inner_resampling,
-  measure = measure,
-  terminator = terminator,
-  fselector = fselector
-)
-
-outer_resampling = rsmp("spcv_coords", folds=5)
-
-rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
-
-
-#--- Step 5: Model evaluation
-# outer folds
-rr$score(measure)
-# Unbiased performance of model with optimal hyperparameters
-rr$aggregate(measure)
-
-
-#--- Step 6: Train final model (applies tuning)
-optFtlrn$train(task_train)
-optFtlrn$model
-
-#--- Step 7: Predict on test data
-optFtlrnPred = optFtlrn$predict(task_test)
-optFtlrnPred$score(measure)
-
-#--- Step 8: Model visualization
-
-# Feature importance
-importance = as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
-colnames(importance) = c("Feature", "Importance")
-ggplot(importance, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_col() + coord_flip() + xlab("")
-
-#--- using IML package
-
-#x = data[,which(names(data) != c("dNBR","geometry","V1"))]
-dat = as.data.table(Chutanli_sf_con) 
-x = dat[,-c("dNBR","geometry")]
-
-# Correlation matrix
-cor(x[, sapply(x, is.numeric)], 
-    method = "pearson")
-
-# Partial Dependence plots
-model = Predictor$new(optFtlrn, data = x, y = dat$dNBR)
-effect = FeatureEffects$new(model, method = "pdp") # partial dependance plots
-plot(effect)
-
-
-# Feature Imp
-#       Level of importance of the features
-impFt = importance$Feature
-effect.imp = FeatureImp$new(model, loss = "mae") # mean absolute error
-effect.imp$plot(features = impFt)
-
-#--- Compare training to test 
-# Feature Importance
-# training
-model.train = Predictor$new(optFtlrn, data = dat[train_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model.train, loss = "mae")
-plot_train = plot(effect, features = impFt)
-
-# test
-model.test = Predictor$new(optFtlrn, data = dat[test_set,-c("geometry")], y = "dNBR")
-effect = FeatureImp$new(model.test, loss = "mae")
-plot_test = plot(effect, features = impFt)
-
-# combine into single plot
-plot_train + plot_test
-
-# Feature effects
-# training
-effect = FeatureEffects$new(model.train)
-plot(effect, features = impFt)
-
-# test
-effect = FeatureEffects$new(model.train)
-plot(effect, features = impFt)
-
-
-#--- DALEX
-# similar to IML package
-#     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(optFtlrn,
-                         data = x, # provide data without y 
-                         y = dat$dNBR,
-                         label = "Chutanli",
-                         colorize = FALSE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-pd = model_profile(model_exp, 
-                   variables = impFt)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
 
 ```
+
