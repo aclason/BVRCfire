@@ -26,10 +26,8 @@ knitr::opts_chunk$set(echo = TRUE)
 
 #------------------------------ Load libraries---------------------------------#
 ls <- c("tidyverse", "data.table", "magrittr") # Data Management and Manipul,ation
-ls <- append(ls, c("raster")) # geo comp.,
-
-ls <- append(ls, c("pdp", "mlr3", "mlr3spatiotempcv", "mlr3verse", "vegan")) # analysis
-
+ls <- append(ls, c("raster")) # geo comp.
+ls <- append(ls, c("pdp", "mlr3", "mlr3spatiotempcv", "mlr3verse", "vegan", "corrplot")) # analysis
 ls <- append(ls, c("iml", "patchwork", "DALEX", "DALEXtra")) # model interpretation/visualization
 
 # Install if needed -- then load. 
@@ -299,7 +297,29 @@ Nadina_sf_cat <- sf::st_as_sf(Nadina[,-c("dNBR")], coords = c("x", "y"))
 ```
 
 
-Alana - making a loop to run through each fire and extract results
+Remove highly correlated variables
+```{r}
+#--- Assess correlated covariates
+plot <- list()
+corrT <- list()
+task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
+dat_names <- list(Chutlani,Nadina,Shovel,Island,Verdun,Tezzeron)
+
+for(i in 1:length(dat_names)){
+  dat <- as.data.table(dat_names[[i]])
+  dat <- dat %>% select_if(is.numeric)
+  
+  corrMat <- round(cor(dat, method="spearman"), 2)
+
+  plot[[i]] <- corrplot(corrMat, 
+                        title = paste0(task_names[i]))
+  # 0.7 cutoff
+  corr <- as.data.frame(corrMat)
+  corr[abs(corr) < .7 & abs(corr) < 1] <- ""
+  write.csv(corr, paste0(datPath, task_names[i], "corr.csv"))
+}
+#keep dmc, fwi. Drop dc, isi
+```
 
 
 I just moved this directly after the data cleaning to make this the spot we modify RF
@@ -309,6 +329,7 @@ set.seed(456)
 task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
 dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat, Island_sf_cat,
                  Verdun_sf_cat, Tezzeron_sf_cat)
+
 #CV_Conf <- list()
 Test_Conf <- list()
 TrainImp_dat <- list()
@@ -318,6 +339,10 @@ effects <- list()
 NumCores <- 20
 
 for(i in 1:length(task_names)){
+  # Remove correlated covariates
+  dat <- dat_list[[i]]
+  dat[,c("dob", "bui", "dc", "isi")] <- list(NULL)
+  
   task = TaskClassifST$new(task_names[i],
                          backend = dat_list[[i]], 
                          target = "dNBRCAT")
@@ -425,12 +450,9 @@ RF_scores
 Test_Conf
 
 #my attempt to make that multi-fire graph:
-TrainImp_dat[[1]][,FireID := task_names[1]]
-TrainImp_dat[[2]][,FireID := task_names[2]]
-TrainImp_dat[[3]][,FireID := task_names[3]]
-TrainImp_dat[[4]][,FireID := task_names[4]]
-TrainImp_dat[[5]][,FireID := task_names[5]]
-TrainImp_dat[[6]][,FireID := task_names[6]]
+for(i in 1:6){
+  TrainImp_dat[[i]][,FireID := task_names[i]]
+}
 TrainImp_dt <- rbindlist(TrainImp_dat)
 setnames(TrainImp_dt, c("Variable","Score","FireID"))
 
@@ -453,14 +475,6 @@ ggplot(Silv_Imp_dt, aes(x = Score, y = reorder(Variable,Score))) +
   xlab("") +
   xlim(c(-0.01,0.2))+
   ylab("Variable Importance")
-
-pd_scores[[1]][,FireID := task_names[1]]
-pd_scores[[2]][,FireID := task_names[2]]
-pd_scores[[3]][,FireID := task_names[3]]
-pd_scores[[4]][,FireID := task_names[4]]
-pd_scores[[5]][,FireID := task_names[5]]
-pd_scores[[6]][,FireID := task_names[6]]
-pd_scores_dt <- rbindlist(pd_scores)
 
 num_features <- c("PlantAge")
 
