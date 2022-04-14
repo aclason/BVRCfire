@@ -15,8 +15,8 @@ Step 1: Prepare data
 Step 2: Define spatial task
 Step 3: Define learner (ranger classification)
 Step 4: Separate task into learning (80%) and test (20%) datasets
-Step 5: Train learner on training data
-Step 6: Optimize hyperparameters (ntrees & mtry) using spatial cross fold validation
+Step 5: Optimize learner variable importance using spatial cross fold validation
+Step 6: Train learner on training data
 Step 7: Predict test data using trained learner
 Step 8: Evaluate model on test data
 Step 9: Visualize 
@@ -171,7 +171,8 @@ Load data as sf object
 ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
                    "OPENING_ID", "PileBurn", "Prune", "Soil", "Spaced", 
                    "SpotBurn", "WBurn","dNBRCAT")
-datPath <-  "./Inputs/"  #"C:/Users/farne/Documents/" 
+datPath <-  "C:/Users/farne/Documents/" #"./Inputs/"
+
 
 Chutanli <- fread(paste0(datPath,"G41607dat270.csv"))
 Chutanli <- Chutanli %>%
@@ -322,6 +323,95 @@ for(i in 1:length(dat_names)){
 ```
 
 
+Benchmarking - tasks with different fire weather variables dropped
+```{r benchmark, echo=FALSE}
+set.seed(456)
+
+task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
+dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat, Island_sf_cat,
+                 Verdun_sf_cat, Tezzeron_sf_cat)
+tab <- list()
+
+for(i in 1:length(task_names)){
+  # Remove correlated covariates
+  dat <- dat_list[[i]]
+  dat.1 <- dplyr::select(dat, -dob, -bui, -dc, -isi)
+  dat.2 <- dplyr::select(dat, -dob, -bui, -dmc, -isi)
+  dat.3 <- dplyr::select(dat, -dob, -bui, -isi)
+  dat.4 <- dplyr::select(dat, -dob, -bui, -dc, -fwi)
+  dat.5 <- dplyr::select(dat, -dob, -bui, -dmc, -fwi)
+  dat.6 <- dplyr::select(dat, -dob, -bui, -fwi)
+
+  
+  task.1 = TaskClassifST$new(task_names[i],
+                         backend = dat.1, 
+                         target = "dNBRCAT")
+
+  task.2 = TaskClassifST$new(task_names[i],
+                         backend = dat.2, 
+                         target = "dNBRCAT")
+  task.3 = TaskClassifST$new(task_names[i],
+                         backend = dat.3, 
+                         target = "dNBRCAT")
+  task.4 = TaskClassifST$new(task_names[i],
+                         backend = dat.4, 
+                         target = "dNBRCAT")
+  task.5 = TaskClassifST$new(task_names[i],
+                         backend = dat.5, 
+                         target = "dNBRCAT")
+  task.6 = TaskClassifST$new(task_names[i],
+                         backend = dat.6, 
+                         target = "dNBRCAT")
+  
+  tasks = list(task.1, task.2, task.3, task.4, task.5, task.6)
+  
+  #--- Step 2: Define a learner
+  # default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
+  learner = lrn("classif.ranger",
+                importance = "permutation",
+                respect.unordered.factors = "order",
+                predict_type = "response",
+                num.threads=NumCores)
+
+  
+  #--- Step 3: Feature selection & task benchmarking (using nested resampling)
+  measure = msr("classif.ce") #classification error
+  fselector = fs("random_search") # using random_search b/c of large search space
+  #level = 0.2 
+  #terminator = trm("perf_reached", level=level)
+  #terminator = trm("stagnation", iters=40, threshold=0)
+  terminator = trm("evals", n_evals=20)
+  inner_resampling = rsmp("spcv_coords", folds=5)
+  outer_resampling = rsmp("spcv_coords", folds=5)
+  
+  # Feature selection
+  optFtlrn = AutoFSelector$new(
+    learner = learner,
+    resampling = inner_resampling,
+    measure = measure,
+    terminator = terminator,
+    fselector = fselector
+  )
+  
+  # Task benchmarking
+  grid = benchmark_grid(
+    tasks = tasks,
+    learner = optFtlrn,
+    resampling = outer_resampling
+  )
+  
+  # Apply optimal learner and benchmarking
+  bmr = benchmark(grid, store_models = TRUE)
+  
+  measure = msr("classif.ce")
+  
+  #--- Compare all tasks 
+  tab[[i]] = bmr$aggregate(measure)
+
+}  
+```
+
+
 I just moved this directly after the data cleaning to make this the spot we modify RF
 ```{r}
 set.seed(456)
@@ -344,7 +434,7 @@ for(i in 1:length(task_names)){
   dat[,c("dob", "bui", "dc", "isi")] <- list(NULL)
   
   task = TaskClassifST$new(task_names[i],
-                         backend = dat_list[[i]], 
+                         backend = dat, 
                          target = "dNBRCAT")
   
   #--- Step 2: Define a learner
@@ -514,6 +604,7 @@ plot(pd_scores[[1]], variables = num_features) +
     ggtitle("Partial Dependence profiles for selected variables")
 plot(pd_scores[[1]], pd_scores[[2]], variables=num_features, color="_label_")
 ```
+
 
 
 # Chutanli
