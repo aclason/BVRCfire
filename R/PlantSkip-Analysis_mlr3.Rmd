@@ -372,17 +372,9 @@ for(i in 1:length(task_names)){
                 respect.unordered.factors = "order",
                 predict_type = "response",
                 num.threads=NumCores)
-  
-  #--- Step 3: Benchmark - assess the multiple tasks
-  
-  design = benchmark_grid(
-    tasks = tasks,
-    learners = learner,
-    resampling = resampling
-  )
 
   
-  #--- Step 4: Feature selection & task benchmarking (using nested resampling)
+  #--- Step 3: Feature selection & task benchmarking (using nested resampling)
   measure = msr("classif.ce") #classification error
   fselector = fs("random_search") # using random_search b/c of large search space
   #level = 0.2 
@@ -408,6 +400,7 @@ for(i in 1:length(task_names)){
     resampling = outer_resampling
   )
   
+  # Apply optimal learner and benchmarking
   bmr = benchmark(grid, store_models = TRUE)
   
   measure = msr("classif.ce")
