@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ls <- c("tidyverse", "data.table", "magrittr") # Data Management and Manipul,ation
 ls <- append(ls, c("raster")) # geo comp.
 ls <- append(ls, c("pdp", "mlr3", "mlr3spatiotempcv", "mlr3verse", "vegan", "corrplot")) # analysis
-ls <- append(ls, c("iml", "patchwork", "DALEX", "DALEXtra")) # model interpretation/visualization
+ls <- append(ls, c("iml", "patchwork", "DALEX", "DALEXtra","wesanderson")) # model interpretation/visualization
 
 # Install if needed -- then load. 
 new.packages <- ls[!(ls %in% installed.packages()[,"Package"])]
@@ -171,7 +171,7 @@ Load data as sf object
 ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
                    "OPENING_ID", "PileBurn", "Prune", "Soil", "Spaced", 
                    "SpotBurn", "WBurn","dNBRCAT")
-datPath <-  "C:/Users/farne/Documents/" #"./Inputs/"
+datPath <- "./Inputs/" # "C:/Users/farne/Documents/" 
 
 
 Chutanli <- fread(paste0(datPath,"G41607dat270.csv"))
@@ -298,13 +298,13 @@ Nadina_sf_cat <- sf::st_as_sf(Nadina[,-c("dNBR")], coords = c("x", "y"))
 ```
 
 
-Remove highly correlated variables
+test highly correlated variables
 ```{r}
 #--- Assess correlated covariates
 plot <- list()
 corrT <- list()
 task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
-dat_names <- list(Chutlani,Nadina,Shovel,Island,Verdun,Tezzeron)
+dat_names <- list(Chutanli,Nadina,Shovel,Island,Verdun,Tezzeron)
 
 for(i in 1:length(dat_names)){
   dat <- as.data.table(dat_names[[i]])
@@ -325,49 +325,47 @@ for(i in 1:length(dat_names)){
 
 Benchmarking - tasks with different fire weather variables dropped
 ```{r benchmark, echo=FALSE}
-set.seed(456)
-
 task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
 dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat, Island_sf_cat,
                  Verdun_sf_cat, Tezzeron_sf_cat)
 tab <- list()
-
+NumCores <- 20
 for(i in 1:length(task_names)){
   # Remove correlated covariates
   dat <- dat_list[[i]]
-  dat.1 <- dplyr::select(dat, -dob, -bui, -dc, -isi)
-  dat.2 <- dplyr::select(dat, -dob, -bui, -dmc, -isi)
-  dat.3 <- dplyr::select(dat, -dob, -bui, -isi)
-  dat.4 <- dplyr::select(dat, -dob, -bui, -dc, -fwi)
-  dat.5 <- dplyr::select(dat, -dob, -bui, -dmc, -fwi)
-  dat.6 <- dplyr::select(dat, -dob, -bui, -fwi)
+  dat.1 <- dplyr::select(dat, -dob, -bui, -dc, -isi) #keep dmc, fwi
+  dat.2 <- dplyr::select(dat, -dob, -bui, -dmc, -isi) #keep dc, fwi
+  dat.3 <- dplyr::select(dat, -dob, -dc, -dmc, -isi) #keep bui, fwi
+  dat.4 <- dplyr::select(dat, -dob, -bui, -dc, -fwi) #keep dmc, isi
+  dat.5 <- dplyr::select(dat, -dob, -bui, -dmc, -fwi) #keep dc, isi
+  dat.6 <- dplyr::select(dat, -dob, -dc, -dmc, -fwi) #keep bui, isi
 
   
-  task.1 = TaskClassifST$new(task_names[i],
+  task.1 <- TaskClassifST$new(task_names[i],
                          backend = dat.1, 
                          target = "dNBRCAT")
 
-  task.2 = TaskClassifST$new(task_names[i],
+  task.2 <- TaskClassifST$new(task_names[i],
                          backend = dat.2, 
                          target = "dNBRCAT")
-  task.3 = TaskClassifST$new(task_names[i],
+  task.3 <- TaskClassifST$new(task_names[i],
                          backend = dat.3, 
                          target = "dNBRCAT")
-  task.4 = TaskClassifST$new(task_names[i],
+  task.4 <- TaskClassifST$new(task_names[i],
                          backend = dat.4, 
                          target = "dNBRCAT")
-  task.5 = TaskClassifST$new(task_names[i],
+  task.5 <- TaskClassifST$new(task_names[i],
                          backend = dat.5, 
                          target = "dNBRCAT")
-  task.6 = TaskClassifST$new(task_names[i],
+  task.6 <- TaskClassifST$new(task_names[i],
                          backend = dat.6, 
                          target = "dNBRCAT")
   
-  tasks = list(task.1, task.2, task.3, task.4, task.5, task.6)
+  tasks <- list(task.1, task.2, task.3, task.4, task.5, task.6)
   
   #--- Step 2: Define a learner
   # default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-  learner = lrn("classif.ranger",
+  learner <- lrn("classif.ranger",
                 importance = "permutation",
                 respect.unordered.factors = "order",
                 predict_type = "response",
@@ -375,17 +373,17 @@ for(i in 1:length(task_names)){
 
   
   #--- Step 3: Feature selection & task benchmarking (using nested resampling)
-  measure = msr("classif.ce") #classification error
-  fselector = fs("random_search") # using random_search b/c of large search space
+  measure <- msr("classif.ce") #classification error
+  fselector <- fs("random_search", batch_size=20) # using random_search b/c of large search space
   #level = 0.2 
   #terminator = trm("perf_reached", level=level)
   #terminator = trm("stagnation", iters=40, threshold=0)
-  terminator = trm("evals", n_evals=20)
-  inner_resampling = rsmp("spcv_coords", folds=5)
-  outer_resampling = rsmp("spcv_coords", folds=5)
+  terminator <- trm("evals", n_evals=20)
+  inner_resampling <- rsmp("spcv_coords", folds=5)
+  outer_resampling <- rsmp("spcv_coords", folds=5)
   
   # Feature selection
-  optFtlrn = AutoFSelector$new(
+  optFtlrn <- AutoFSelector$new(
     learner = learner,
     resampling = inner_resampling,
     measure = measure,
@@ -394,71 +392,79 @@ for(i in 1:length(task_names)){
   )
   
   # Task benchmarking
-  grid = benchmark_grid(
+  grid <- benchmark_grid(
     tasks = tasks,
     learner = optFtlrn,
     resampling = outer_resampling
   )
   
   # Apply optimal learner and benchmarking
-  bmr = benchmark(grid, store_models = TRUE)
+  set.seed(456)
+  bmr <- benchmark(grid, store_models = TRUE)
   
-  measure = msr("classif.ce")
+  measure <- msr("classif.ce")
   
   #--- Compare all tasks 
-  tab[[i]] = bmr$aggregate(measure)
+  tab[[i]] <- bmr$aggregate(measure)
 
-}  
+} 
+for(i in 1:6){
+  tab[[i]][,FireID := task_names[i]]
+}
+tab_dt <- rbindlist(tab)
+
+#which nr is the min for each fire?
+tab_dt[,.SD[which.min(classif.ce)], by=.(FireID)]
+
+#which is the most common? 5 or 6.
+
+#select 5?
+
 ```
 
 
 I just moved this directly after the data cleaning to make this the spot we modify RF
 ```{r}
-set.seed(456)
-
-task_names <- c("Chutlani","Nadina","Shovel","Island","Verdun","Tezzeron")
+task_names <- c("Chutanli","Nadina","Shovel","Island","Verdun","Tezzeron")
 dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat, Island_sf_cat,
                  Verdun_sf_cat, Tezzeron_sf_cat)
-
 #CV_Conf <- list()
 Test_Conf <- list()
 TrainImp_dat <- list()
 RF_scores <- list()
 pd_scores <- list()
 effects <- list()
-NumCores <- 20
+NumCores <- 30
 
 for(i in 1:length(task_names)){
   # Remove correlated covariates
   dat <- dat_list[[i]]
-  dat[,c("dob", "bui", "dc", "isi")] <- list(NULL)
+  dat <- dplyr::select(dat, -dob, -bui, -dmc, -fwi) #keep dc, isi
   
-  task = TaskClassifST$new(task_names[i],
+  task <- TaskClassifST$new(task_names[i],
                          backend = dat, 
                          target = "dNBRCAT")
   
-  #--- Step 2: Define a learner
+  #--- Step 1: Define a learner
   # default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-  learner = lrn("classif.ranger",
+  learner <- lrn("classif.ranger",
                 importance = "permutation",
                 respect.unordered.factors = "order",
                 predict_type = "response",
+                num.trees = 2000,
                 num.threads=NumCores)
   
-  #--- Step 3: Split stratified task into test/train data
-  split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime? - can use set.seed at begining 
+  #--- Step 2: Split stratified task into test/train data
+  set.seed(456)
+  split <- partition(task, ratio=0.8, stratify=TRUE)
+  task_train <- task$clone()$filter(rows=split$train)
+  task_test <- task$clone()$filter(rows=split$test)
   
-  task_train = task$clone()$filter(rows=split$train)
-  task_test = task$clone()$filter(rows=split$test)
-  
-  #--- Step 4: Feature selection (using nested resampling)
-  measure = msr("classif.ce") #classification error
-  fselector = fs("random_search") # using random_search b/c of large search space
-  #level = 0.2 
-  #terminator = trm("perf_reached", level=level)
-  #terminator = trm("stagnation", iters=40, threshold=0)
-  terminator = trm("evals", n_evals=20)
-  inner_resampling = rsmp("spcv_coords", folds=5)
+  #--- Step 3: Feature selection (using nested resampling)
+  measure <- msr("classif.ce") #classification error
+  fselector <- fs("random_search", batch_size = 30)
+  terminator <- trm("evals", n_evals=100)
+  inner_resampling <- rsmp("spcv_coords", folds=5)
    
   optFtlrn = AutoFSelector$new(
     learner = learner,
@@ -468,76 +474,53 @@ for(i in 1:length(task_names)){
     fselector = fselector
   )
   
-  #outer_resampling = rsmp("spcv_coords", folds=5)
-  #autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
+  #--- Step 4: Train final model (applies tuning)
+  set.seed(456)
+  optFtlrn$train(task_train) 
   
-  #rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
-  
-  #--- Step 5: Model evaluation
-  # outer folds
-  #rr$score(measure)
-  # Unbiased performance of model with optimal hyperparameters
-  #rr$aggregate(measure)
-  
-  #So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data
-  
-  #--- Step 6: Train final model (applies tuning)
-  optFtlrn$train(task_train) #I don't see how the tuning is applied here
-  #optFtlrn$model
-  
-  #--- Step 7: Predict on test data
+  #--- Step 5: Predict on test data
   optFtlrnPred <- optFtlrn$predict(task_test) 
   optFtlrnPred$score(measure)
   
-  #cross-validated predictions (only train data)
-  #rr$prediction()
   #trained model predictions
-  optFtlrnPred$prob
-  
-  #confusion matrix:
-  #CV_Conf[[i]] <- rr$prediction()$confusion
+  #optFtlrnPred$prob
   Test_Conf[[i]] <- optFtlrnPred$confusion
-  
- # rr$score()
   RF_scores[[i]] <- optFtlrnPred$score()
   
-  #sum(rr$prediction()$confusion) #so this is on the training data
-  #sum(optFtlrnPred$confusion) # this is on the test data
-  
-  #it's good at predicting unburned, there is no high severity here
-  
-  #--- Step 8: Model visualization
+  #--- Step 6: Model visualization
   # Feature importance
   TrainImp_dat[[i]] <- as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
   
   # Feature Imp
-  #       Level of importance of the features
-  #AC: I think we need to pass just the training data?
+  #  Level of importance of the features
   dat_train <- task_train$data()
   x_train <- dat_train[,-c("dNBRCAT")]
-  #dat_test <- task_test$data()
   
-  #impFt <- TrainImp_dat[[i]]$Feature
   model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
-  #effect.imp <- FeatureImp$new(model, loss = "ce")
-  #effect.imp$plot(features = impFt)
-  
   effects[[i]] <- FeatureEffects$new(model)
-  #plot(effects)
-  #optFtlrn$predict_type <- "response"
   model_exp = explain_mlr3(optFtlrn,
                          data = x_train, # provide data without y 
                          y = dat_train$dNBRCAT,
                          colorize = FALSE,
                          type="classification")
 
-  # Partial dependence plots of top variables
   pd_scores[[i]] <- model_profile(model_exp)$agr_profiles
   
-}  
-  
-RF_scores
-Test_Conf
+} 
+
+Test_Conf 
+TrainImp_dat 
+RF_scores 
+pd_scores 
+effects 
+
+
+
+```
+
+
+```{r}
+########### results
 
 #my attempt to make that multi-fire graph:
 for(i in 1:6){
@@ -545,11 +528,60 @@ for(i in 1:6){
 }
 TrainImp_dt <- rbindlist(TrainImp_dat)
 setnames(TrainImp_dt, c("Variable","Score","FireID"))
+TrainImp_dt[,VarCat:=ifelse(Variable =="PlantAge","Forest structure",
+                      ifelse(Variable =="BASAL_AREA","Forest structure",
+                       ifelse(Variable =="CROWN_CLOS","Forest structure",
+                        ifelse(Variable =="HistoricFires","Forest structure",
+                         ifelse(Variable =="DFirCov","Forest structure",
+                          ifelse(Variable =="SpruceCov","Forest structure",
+                           ifelse(Variable =="FirCov","Forest structure",
+                            ifelse(Variable =="decidCov","Forest structure",
+                             ifelse(Variable =="PineCov","Forest structure",
+                               ifelse(Variable =="PCNM1","Spatial",
+                                ifelse(Variable =="PCNM2","Spatial",
+                                 ifelse(Variable =="PCNM3","Spatial",
+                                  ifelse(Variable =="PCNM4","Spatial",
+                                   ifelse(Variable =="PCNM5","Spatial",
+                                    ifelse(Variable =="DEMslope","Climate-Topography",
+                                     ifelse(Variable =="DEMhli","Climate-Topography",
+                                      ifelse(Variable =="DEMaspect","Climate-Topography",
+                                       ifelse(Variable =="BEC","Climate-Topography",
+                                       ifelse(Variable =="dc","Fire weather",
+                                        ifelse(Variable =="isi","Fire weather",
+                                         ifelse(Variable =="maxT","Fire weather",
+                                          ifelse(Variable =="maxRH","Fire weather",
+                                           ifelse(Variable =="maxW","Fire weather",
+                                            ifelse(Variable =="FireRun","Fire weather",
+                                              "Silviculture"))))))))))))))))))))))))]
+colVar <- unique(TrainImp_dt[,.(Variable,VarCat)])
 
-#ggplot(TrainImp_dt, aes(x = reorder(V1, V2), y = V2)) +
+
+#doesn't work because of ordering
+colVar[,VarCatCol:=ifelse(VarCat=="Forest structure", 
+                               wes_palette(5,name="Darjeeling1",type="continuous")[][1],
+                         ifelse(VarCat=="Spatial", 
+                                wes_palette(5,name="Darjeeling1",type="continuous")[][2],
+                          ifelse(VarCat=="Climate-Topography",
+                                 wes_palette(5,name="Darjeeling1",type="continuous")[][3],
+                            ifelse(VarCat=="Fire weather",
+                                 wes_palette(5,name="Darjeeling1",type="continuous")[][4],
+                                 wes_palette(5,name="Darjeeling1",type="continuous")[][5]))))]
+colVar
+
+ggplot(TrainImp_dt, aes(x = Score, y = reorder(VarCat,Score))) +  
+  geom_point(aes(colour=FireID), size=3) +
+  scale_color_viridis_d(name="Fire",labels=c("Chutanli","Island","Nadina","Shovel","Tezzeron","Verdun"))+
+  xlab("Variable importance")+
+  ylab("Variable groups")+
+  theme_minimal()
+
 ggplot(TrainImp_dt, aes(x = Score, y = reorder(Variable,Score))) +  
-  geom_point(aes(colour=FireID), size=2) +
-  xlab("")
+  geom_point(aes(colour=FireID), size=3) +
+  scale_color_viridis_d(name="Fire",labels=c("Chutanli","Island","Nadina","Shovel","Tezzeron","Verdun"))+
+  xlab("Variable importance")+
+  ylab("Variable groups")+
+  theme_minimal()
+
 
 ggplot(TrainImp_dt, aes(x = Score, y = reorder(Variable,Score))) +  
   geom_point(aes(colour=FireID), size=2) +
@@ -575,9 +607,6 @@ plot(effects[[1]], features = num_features)
 plot(effects[[1]]$results$PlantAge$.value ~ effects[[1]]$results$PlantAge$.borders)
 
 
-ggplot(effects[[1]]$results$PlantAge)+
-  geom_line(aes(x=.borders, y=.value, colour = .class), size=2)
-
 PD_plantAge <- list() 
 for(i in 1:length(effects)){
   PD_plantAge[[i]] <- data.table(effects[[i]]$results$PlantAge)[,FireID := task_names[i]]
@@ -598,11 +627,93 @@ ggplot(PD_CrownClos_dt)+
   geom_line(aes(x=.borders, y=.value, colour = FireID), size=1.5)+
   facet_wrap(".class")
 
+PD_Brushed <- list() 
+for(i in 1:length(effects)){
+  PD_Brushed[[i]] <- data.table(effects[[i]]$results$Brushed)[,FireID := task_names[i]]
+}
+PD_Brushed_dt <- rbindlist(PD_Brushed)
 
-plot(pd_scores[[1]], variables = num_features) +
-    #scale_y_continuous("Estimated dNBR") +
-    ggtitle("Partial Dependence profiles for selected variables")
-plot(pd_scores[[1]], pd_scores[[2]], variables=num_features, color="_label_")
+ggplot(PD_Brushed_dt)+
+  geom_point(aes(x=.borders, y=.value, colour = FireID), size=1.5)+
+  facet_wrap(".class")
+
+PD_BroadBurn <- list() 
+for(i in 1:length(effects)){
+  PD_BroadBurn[[i]] <- data.table(effects[[i]]$results$BroadBurn)[,FireID := task_names[i]]
+}
+PD_BroadBurn_dt <- rbindlist(PD_BroadBurn)
+
+ggplot(PD_BroadBurn_dt)+
+  geom_point(aes(x=.borders, y=.value, colour = FireID), size=1.5)+
+  facet_wrap(".class")
+
+PD_Soil <- list() 
+for(i in 1:5){
+  PD_Soil[[i]] <- data.table(effects[[i]]$results$Soil)[,FireID := task_names[i]]
+}
+PD_Soil_dt <- rbindlist(PD_Soil)
+
+PD_Brushed <- list() 
+for(i in 1:5){
+  PD_Brushed[[i]] <- data.table(effects[[i]]$results$Brushed)[,FireID := task_names[i]]
+}
+PD_Brushed_dt <- rbindlist(PD_Brushed)
+
+PD_DebrisPiled <- list() 
+for(i in 1:5){
+  PD_DebrisPiled[[i]] <- data.table(effects[[i]]$results$DebrisPiled)[,FireID := task_names[i]]
+}
+PD_DebrisPiled_dt <- rbindlist(PD_DebrisPiled)
+
+PD_PileBurn <- list() 
+for(i in 1:5){
+  PD_PileBurn[[i]] <- data.table(effects[[i]]$results$PileBurn)[,FireID := task_names[i]]
+}
+PD_PileBurn_dt <- rbindlist(PD_PileBurn)
+
+
+ggplot(PD_Soil_dt)+
+  geom_point(aes(x=.borders, y=.value, colour = FireID), size=1.5)+
+  facet_wrap(".class")
+
+PD_silv <- rbind(PD_BroadBurn_dt, PD_Soil_dt, PD_Brushed_dt,PD_DebrisPiled_dt,PD_PileBurn_dt)
+
+ggplot(PD_silv)+
+  geom_jitter(aes(x=.borders, y=.value, colour=FireID), size=3)+
+  #facet_wrap(".class")
+  facet_grid(c(".feature",".class"))
+  ylim(c(-0.02,0.02))
+
+
+#probability of unburned:
+PD_plantAge_dt
+PD_CrownClos_dt
+
+
+```
+
+Descriptive analyses
+```{r}
+#this is based off pixels that was analysed
+Silvic_Vars <- c("BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "PileBurn", 
+                  "Prune", "Soil", "Spaced", "SpotBurn")
+
+Chutanli[,colnames(Chutanli) %in% Silvic_Vars, with=FALSE]
+
+Chutanli[,.N, by=.(BroadBurn)]
+Nadina[,.N, by=.(BroadBurn)]
+Verdun[,.N, by=.(BroadBurn)]
+Island[,.N, by=.(BroadBurn)]
+Tezzeron[,.N, by=.(BroadBurn)]
+Shovel[,.N, by=.(BroadBurn)]
+
+
+Chutanli[,.N, by=.(Brushed)]
+Nadina[,.N, by=.(Brushed)]
+Verdun[,.N, by=.(Brushed)]
+Island[,.N, by=.(Brushed)]
+Tezzeron[,.N, by=.(Brushed)]
+Shovel[,.N, by=.(Brushed)]
 ```
 
 
