@@ -25,7 +25,7 @@ Step 9: Visualize
 knitr::opts_chunk$set(echo = TRUE)
 
 #------------------------------ Load libraries---------------------------------#
-ls <- c("tidyverse", "data.table", "magrittr") # Data Management and Manipul,ation
+ls <- c("tidyverse", "data.table", "magrittr") # Data Management and Manipulation
 ls <- append(ls, c("raster")) # geo comp.
 ls <- append(ls, c("pdp", "mlr3", "mlr3spatiotempcv", "mlr3verse", "vegan", "corrplot")) # analysis
 ls <- append(ls, c("iml", "patchwork", "DALEX", "DALEXtra","wesanderson")) # model interpretation/visualization
@@ -76,7 +76,7 @@ CatRasts <- grep(paste(ctg_variables,sep = "", collapse = "|"),variable.name,val
 
 Prepare the data:
 - Resample response and predictor variables to have the same extent and resolution (30 x 30 m) for each of the fires. 
--     Categorical variables are resampled using nearest neighbourhood and continuous variables are resampled using bilinear          resampling.
+-     Categorical variables are resampled using nearest neighbourhood and continuous variables are resampled using bilinear resampling.
 - Subsample at 270-m grid spacing to reduce spatial autocorrelation
 - Data must be free of NAs 
 - Data must not have variables with no variance
@@ -167,11 +167,13 @@ for(ii in 1:length(list_dats)){
 Load the above data that I saved to my computer (for faster processing)
 Load data as sf object
 - scale dNBR *1000
+- set fire history == 0 to 100
+- add principal coordinate analysis variables to predictors
 ```{r, include=FALSE}
 ctg_variables <- c("BEC", "BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
                    "OPENING_ID", "PileBurn", "Prune", "Soil", "Spaced", 
                    "SpotBurn", "WBurn","dNBRCAT")
-datPath <- "./Inputs/" # "C:/Users/farne/Documents/" 
+datPath <- "C:/Users/farne/Documents/" #"./Inputs/"   
 
 
 Chutanli <- fread(paste0(datPath,"G41607dat270.csv"))
@@ -195,6 +197,7 @@ Tezzeron <- Tezzeron %>%
   mutate_at((colnames(Tezzeron)[colnames(Tezzeron) %in% ctg_variables]), factor)%>%
   dplyr::select(-c("dNBRReSamp"))
 Tezzeron[,dNBR := dNBR*1000]
+#Tezzeron[HistoricFires==0 ,Tezzeron:=100] # no historic fires
 Tezzeron_dist <- dist(Tezzeron[,.(x,y)], method = "euclidean")
 Tezzeron_pcnm <- pcnm(Tezzeron_dist)
 Tezzeron[, c("PCNM1","PCNM2", "PCNM3",
@@ -423,7 +426,7 @@ tab_dt[,.SD[which.min(classif.ce)], by=.(FireID)]
 ```
 
 
-I just moved this directly after the data cleaning to make this the spot we modify RF
+RF analysis (multicorrilated variables are dropped, model is tuned for top pred variables)
 ```{r}
 task_names <- c("Chutanli","Nadina","Shovel","Island","Verdun","Tezzeron")
 dat_list <- list(Chutanli_sf_cat, Nadina_sf_cat, Shovel_sf_cat, Island_sf_cat,
@@ -519,6 +522,7 @@ effects
 ```
 
 
+Results figures
 ```{r}
 ########### results
 
@@ -692,219 +696,11 @@ PD_CrownClos_dt
 
 ```
 
-Descriptive analyses
-```{r}
-#this is based off pixels that was analysed
-Silvic_Vars <- c("BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "PileBurn", 
-                  "Prune", "Soil", "Spaced", "SpotBurn")
 
-Chutanli[,colnames(Chutanli) %in% Silvic_Vars, with=FALSE]
-
-Chutanli[,.N, by=.(BroadBurn)]
-Nadina[,.N, by=.(BroadBurn)]
-Verdun[,.N, by=.(BroadBurn)]
-Island[,.N, by=.(BroadBurn)]
-Tezzeron[,.N, by=.(BroadBurn)]
-Shovel[,.N, by=.(BroadBurn)]
-
-
-Chutanli[,.N, by=.(Brushed)]
-Nadina[,.N, by=.(Brushed)]
-Verdun[,.N, by=.(Brushed)]
-Island[,.N, by=.(Brushed)]
-Tezzeron[,.N, by=.(Brushed)]
-Shovel[,.N, by=.(Brushed)]
-```
-
-
-
-# Chutanli
-```{r Chutanli, echo=FALSE}
-
-
-################################################################################
-#################################### Categorical response variable
-
-# Correlation
-datCon_list <- Chutanli_sf_con
-dat <- as.data.table(datCon_list)
-dat <- dat %>% select_if(is.numeric)
-corrMat <- round(cor(dat, method="spearman"), 2)
-
-corrplot(corrMat)
-# 0.7 cutoff
-corr <- as.data.frame(corrMat)
-corr[abs(corr) < .7 & abs(corr) < 1] <- ""
-corr
-
-#--- Step 1: Define a task
-# dat <- as.data.table(Chutanli_sf_cat)
-# dat <- dat[,-c("geometry")]
-# x <- dat[,-c("dNBRCAT")]
-# dat[,dNBRCAT:=as.factor(ifelse(dNBRCAT==1,0,1))]
-#Chutanli_sf_cat <- dplyr::select(Chutanli_sf_cat, - PlantAge)
-set.seed(456)
-
-
-task = TaskClassifST$new("Chutanli",
-                       backend = Chutanli_sf_cat, #dat, 
-                       target = "dNBRCAT")
-
-#--- Step 2: Define a learner
-# default ranger parameters: https://mlr3learners.mlr-org.com/reference/mlr_learners_regr.ranger.html
-learner = lrn("classif.ranger",
-              importance = "permutation",
-              respect.unordered.factors = "order",
-              predict_type = "prob",
-              num.threads=20)
-
-#--- Step 3: Split stratified task into test/train data
-split = partition(task, ratio=0.8, stratify=TRUE) #so everytime we re-run, this selection will change. Can we make this the same everytime somehow? Or do we want the random sampling to vary everytime? -- Set seed at the very beginning of workflow. partition() is a mlr3 function so set.seed at beginning appears to work. Ran, cleared, reran and splits were the same both times. 
-
-task_train = task$clone()$filter(rows=split$train)
-task_test = task$clone()$filter(rows=split$test)
-
-#--- Step 4: Feature selection (using nested resampling)
-measure = msr("classif.ce") #classification error
-fselector = fs("random_search", batch_size=15) # using random_search b/c of large search space
-
-level = 0.5 #0.1 # Alana try 0.1
-terminator = trm("perf_reached", level=level) #fselector stops after model measure is within 10% of best model
-# doesn't seem to terminate with level <0.5, anything higher and terminates right after 1 evaluation... but not sure what this means? unstable model? .. but maybe on Alana's computer it actually terminates in a reasonable time
-inner_resampling = rsmp("spcv_coords", folds=5)
- 
-optFtlrn = AutoFSelector$new(
-  learner = learner,
-  resampling = inner_resampling,
-  measure = measure,
-  terminator = terminator,
-  fselector = fselector
-)
-
-# outer_resampling = rsmp("spcv_coords", folds=5)
-# autoplot(inner_resampling, task_train, fold_id = c(1:4), size = 0.7)
-# 
-# rr = mlr3::resample(task_train, optFtlrn, outer_resampling, store_models = TRUE)
-# 
-# #--- Step 5: Model evaluation
-# # outer folds
-# rr$score(measure)
-# # Unbiased performance of model with optimal hyperparameters
-# rr$aggregate(measure)
-
-#So I think we have two model performance values here. The spatial cross-validation of the training data and then the performance on the test data - Yes, need to pick one or the other because if you run both, the test data model evaluation increases (because learner has been trained twice)
-
-#--- Step 6: Train final model (applies tuning)
-optFtlrn$train(task_train) 
-optFtlrn$model
-
-#--- Step 7: Predict on test data & assess model
-optFtlrnPred = optFtlrn$predict(task_test) 
-optFtlrnPred$score(measure)
-# 
-#cross-validated predictions (only train data)
-# rr$prediction()
-#trained model predictions
-optFtlrnPred$prob
-
-#confusion matrix:
-# rr$prediction()$confusion
-optFtlrnPred$confusion
-
-
-
-# sum(rr$prediction()$confusion) #so this is on the training data
-sum(optFtlrnPred$confusion) # this is on the test data
-
-#it's good at predicting unburned, there is no high severity here
-
-#--- Step 8: Model visualization
-# Feature importance
-importance = as.data.table(optFtlrn$learner$importance(), keep.rownames = TRUE)
-colnames(importance) = c("Feature", "Importance")
-ggplot(importance, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_col() + coord_flip() + xlab("")
-
-# Feature Imp
-#       Level of importance of the features
-#AC: I think we need to pass just the training data?
-dat_train <- task_train$data()
-x_train <- dat_train[,-c("dNBRCAT")]
-dat_test <- task_test$data()
-
-impFt = importance$Feature
-model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
-effect.imp = FeatureImp$new(model, loss = "ce")
-effect.imp$plot(features = impFt)
-
-
-
-######################################################
-
-###AC: I'm not sure about everything from here down
-
-#--- using IML package
-dat <- as.data.table(Chutanli_sf_cat)
-x <- dat[,-c("dNBRCAT","geometry")]
-
-
-model <- Predictor$new(optFtlrn, data = x_train, y = dat_train$dNBRCAT)
-
-# or look at partial dependance plots
-effect <- FeatureEffects$new(model, method = "pdp") # partial dependance plots
-plot(effect)
-
-#--- Compare training to test - AC: I'm not sure yet what this is doing exactly
-# Feature Importance
-# training
-model.train = Predictor$new(optFtlrn, data = dat_train, y = "dNBRCAT")
-effect = FeatureImp$new(model.train, loss = "ce")
-plot_train = plot(effect, features = impFt) #this is different than the feature importance above
-
-# test
-model.test = Predictor$new(optFtlrn, data = dat_test, y = "dNBRCAT")
-effect = FeatureImp$new(model.test, loss = "ce")
-plot_test = plot(effect, features = impFt)
-
-# combine into single plot
-plot_train + plot_test
-
-# Feature effects
-# training
-effect = FeatureEffects$new(model.train)
-plot(effect, features = impFt)
-
-# test
-effect = FeatureEffects$new(model.train)
-plot(effect, features = impFt)
-
-
-#--- DALEX
-# similar to IML package
-#     Methods for analyzing the model at the level of a single prediction and the global level
-model_exp = explain_mlr3(optFtlrn,
-                         data = x, # provide data without y 
-                         y = dat$dNBRCAT,
-                         label = "Chutanli",
-                         colorize = FALSE)
-
-# Dataset level exploration
-# Importance of variables - permutation based importance
-model_vi = model_parts(model_exp)
-head(model_vi)
-plot(model_vi, show_boxplots = FALSE)
-
-# Partial dependence plots of top variables
-pd = model_profile(model_exp, 
-                   variables = impFt)$agr_profiles
-pd
-plot(pd) +
-  scale_y_continuous("Estimated dNBR") +
-  ggtitle("Partial Dependence profiles for selected variables")
-
-```
 
 Relationship between plantation age and dNBR (continuous)
+
+IF -- can we drop this?
 ```{r}
 
 set.seed(456)
