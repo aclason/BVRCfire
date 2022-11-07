@@ -60,8 +60,9 @@ SpatialFilesPath <- getwd()
 FiresOfInterest <- c("G41607", "G51632", "R11498", "R11796","R11921","R21721")
 StudyFirePerims <- read_sf("./Inputs/Shapefiles/Study_fire_perimeters.shp")
 #over the first value, and under the second = 1
-m <- c(-Inf, 99, 1,  100, 269, 2,  270, 659, 3, 660,Inf,4)
-rclmat <- cbind(from = c(-Inf, 99, 269, 659), to = c(99, 269, 659, Inf), becomes = c(1,2,3,4))
+# all values > -Inf and <= 99 become class 1; > 99  <= 269 etc.
+m <- c(-Inf, 99, 1,  99, 269, 2,  269, 659, 3, 660,Inf,4)
+#rclmat <- cbind(from = c(-Inf, 99, 269, 659), to = c(99, 269, 659, Inf), becomes = c(1,2,3,4))
 rclmat <- matrix(m, ncol=3, byrow=TRUE)
 
 # Read in the rasters
@@ -69,7 +70,9 @@ variable_list <- list.files(paste0(SpatialFilesPath, "/Inputs/Rasters/dNBR/"),
                             pattern =  paste(FiresOfInterest, sep = "", collapse = "|"), # only import the fires of interest
                             recursive = TRUE,
                             full.names = TRUE)
-variable_list <- grep("tif", variable_list, value=TRUE)
+#just get the raw dnbrs:
+variable_list <- grep(paste0("[[:digit:]]",".tif"), variable_list, value=TRUE)
+
 variables <- sapply(variable_list, raster)
 
 # Rename the variables 
