@@ -17,11 +17,12 @@ library(readr)
 SpatialFilesPath <- "D:/"
 study_fireTable <- fread("./Inputs/StudyFireList.csv")
 dNBR_imageryDates <- fread("./Inputs/dNBR_dates.csv")
-SitePrepGroups <- fread("./Inputs/SitePrep_TypeMethods.csv")
+#SitePrepGroups <- fread("./Inputs/SitePrep_TypeMethods.csv")
+SitePrepGroups <- fread("./Inputs/SitePrep_TypeMethods_Disc.csv")
 
 FiresOfInterest <- c("R11796","R11498","R21721","R11921","G41607","G51632")
 RESULTS_rasts <- c("OPENING_ID","PlantAge","BroadBurn","DebrisMade","DebrisPiled","MechUnk",
-                   "PileBurn", "Soil", "SpotBurn","Spaced","Brushed",
+                   "PileBurn", "Soil", "SpotBurn","Spaced","Brushed","Disc",
                    "Fertil","Prune")
 
 ##### Fire perimeters #####
@@ -283,15 +284,17 @@ for(ix in 1:length(FiresOfInterest)){
   RESULTS_rasts_avail <- c(colnames(Plant_SP)[colnames(Plant_SP) %in% RESULTS_rasts],"geometry")
   Plant_SP_sf <- st_as_sf(Plant_SP[,..RESULTS_rasts_avail])
   Plant_SP_sf <- st_make_valid(Plant_SP_sf)
+  Plant_SP_sf <- st_cast(Plant_SP_sf, to="MULTIPOLYGON")
   write_sf(Plant_SP_sf, paste0("./Inputs/Shapefiles/",Fire$FIRE_NUMBE,"_Plantations.shp"))
   #rastToMake <- RESULTS_rasts_avail[RESULTS_rasts_avail != "geometry"]
-  #plot(fasterize(Plant_SP_sf,FireRast, field=RESULTS_rasts[1]))
+  rastToMake <- "Disc"
+ plot(fasterize(Plant_SP_sf,FireRast, field=RESULTS_rasts[1]))
   #write out the rasters
-  #for(iix in 1:length(rastToMake)){
-   # writeRaster(fasterize(Plant_SP_sf,FireRast, field=rastToMake[iix]),
-    #            paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_",rastToMake[iix],".tif"),
-     #           overwrite=TRUE)
-  #}
+  for(iix in 1:length(rastToMake)){
+    writeRaster(fasterize(Plant_SP_sf,FireRast, field=rastToMake[iix]),
+                paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_",rastToMake[iix],".tif"),
+                overwrite=TRUE)
+  }
 }
 
 
