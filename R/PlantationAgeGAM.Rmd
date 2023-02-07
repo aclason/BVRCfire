@@ -137,6 +137,7 @@ The smooth functions have several parameters that can be set to change their beh
 k: basis dimension - Determines the maximum number of base functions used to build the curve. - Sets the wiggliness of a smooth, in a trade-off with the smoothing parameter. - The k should always be less than the number of unique data points. - The complexity (i.e. non-linearity) of a smooth function in a fitted model is reflected by its effective degrees of freedom (EDF).
 
 bs specifies the type of basis functions. - The default for s() is tp (thin plate regression spline). - The default for te() and ti() is cr (cubic regression spline).
+bs = "cr", denotes knot based cubic regression splines
 
 When using te() and ti() basis function, we also need to set the parameter d, which specifies that predictors in the interaction are on the same scale or dimension. - For example, in te(Time, width, height, d=c(1,2)), indicates that width and height are one the same scale, but not Time.
 
@@ -145,11 +146,14 @@ link function: identity = model doesn't transform the predictions
 
 ```{r echo=FALSE}
 #-- Chutanli
-gamMod_Chut <- gam(dNBR~s(PlantAge), data = Chutanli, method = "REML")
+gamMod_Chut <- gam(dNBR~s(PlantAge), data = Chutanli, method = "REML") # thin plate regression spline
+gamMod_Chutcr <- gam(dNBR~s(PlantAge, bs = "cr", k = 20), data = Chutanli, method = "REML") # cubic regression spline
 
 summary(gamMod_Chut)
 gam.check(gamMod_Chut)
+gam.check(gamMod_Chutcr)
 plot(gamMod_Chut, residuals = TRUE)
+plot(gamMod_Chutcr)
 plot(gamMod_Chut)
 
 plot <- ggplot(Chutanli, aes(x = PlantAge, y = dNBR)) +
@@ -157,6 +161,7 @@ plot <- ggplot(Chutanli, aes(x = PlantAge, y = dNBR)) +
               formula = y ~ s(x))
 plot
 
+AIC(gamMod_Chut, gamMod_Chutcr)
 #-- Tezzeron
 gamMod_Tez <- gam(dNBR~s(PlantAge), data = Tezzeron, method = "REML")
 
