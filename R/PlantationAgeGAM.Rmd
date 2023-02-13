@@ -34,7 +34,7 @@ Chutanli <- Chutanli %>%
 Chutanli[,dNBR := dNBR*1000]
 Chutanli[HistoricFires==0 ,HistoricFires:=100]
 Chutanli_dist <- dist(Chutanli[,.(x,y)], method = "euclidean")
-Chutanli_pcnm <- pcnm(Chutanli_dist)
+Chutanli_pcnm <- pcnm(Chutanli_dist, threshold = 10000) # added threshold (analyis should change to this as well)
 Chutanli[, c("PCNM1","PCNM2", "PCNM3",
              "PCNM4", "PCNM5","PCNM6") := .(Chutanli_pcnm$vectors[,"PCNM1"],
                                             Chutanli_pcnm$vectors[,"PCNM2"],
@@ -50,7 +50,7 @@ Tezzeron <- Tezzeron %>%
 Tezzeron[,dNBR := dNBR*1000]
 #Tezzeron[HistoricFires==0 ,Tezzeron:=100] # no historic fires
 Tezzeron_dist <- dist(Tezzeron[,.(x,y)], method = "euclidean")
-Tezzeron_pcnm <- pcnm(Tezzeron_dist)
+Tezzeron_pcnm <- pcnm(Tezzeron_dist, threshold = 10000) # added threshold (analyis should change to this as well)
 Tezzeron[, c("PCNM1","PCNM2", "PCNM3",
              "PCNM4", "PCNM5","PCNM6") := .(Tezzeron_pcnm$vectors[,"PCNM1"],
                                             Tezzeron_pcnm$vectors[,"PCNM2"],
@@ -66,7 +66,7 @@ Shovel <- Shovel %>%
 Shovel[,dNBR := dNBR*1000]
 Shovel[HistoricFires==0 ,HistoricFires:=100]
 Shovel_dist <- dist(Shovel[,.(x,y)], method = "euclidean")
-Shovel_pcnm <- pcnm(Shovel_dist)
+Shovel_pcnm <- pcnm(Shovel_dist, threshold = 10000) # added threshold (analyis should change to this as well)
 Shovel[, c("PCNM1","PCNM2", "PCNM3",
              "PCNM4", "PCNM5","PCNM6") := .(Shovel_pcnm$vectors[,"PCNM1"],
                                             Shovel_pcnm$vectors[,"PCNM2"],
@@ -82,7 +82,7 @@ Verdun <- Verdun %>%
 Verdun[,dNBR := dNBR*1000]
 Verdun[HistoricFires==0 ,HistoricFires:=100]
 Verdun_dist <- dist(Verdun[,.(x,y)], method = "euclidean")
-Verdun_pcnm <- pcnm(Verdun_dist)
+Verdun_pcnm <- pcnm(Verdun_dist, threshold = 10000) # added threshold (analyis should change to this as well)
 Verdun[, c("PCNM1","PCNM2", "PCNM3",
              "PCNM4", "PCNM5","PCNM6") := .(Verdun_pcnm$vectors[,"PCNM1"],
                                             Verdun_pcnm$vectors[,"PCNM2"],
@@ -98,7 +98,7 @@ Island <- Island %>%
 Island[,dNBR := dNBR*1000]
 Island[HistoricFires==0 ,HistoricFires:=100]
 Island_dist <- dist(Island[,.(x,y)], method = "euclidean")
-Island_pcnm <- pcnm(Island_dist)
+Island_pcnm <- pcnm(Island_dist, threshold = 10000) # added threshold (analyis should change to this as well)
 Island[, c("PCNM1","PCNM2", "PCNM3",
              "PCNM4", "PCNM5","PCNM6") := .(Island_pcnm$vectors[,"PCNM1"],
                                             Island_pcnm$vectors[,"PCNM2"],
@@ -114,7 +114,7 @@ Nadina <- Nadina %>%
 Nadina[,dNBR := dNBR*1000]
 Nadina[HistoricFires==0 ,HistoricFires:=100]
 Nadina_dist <- dist(Nadina[,.(x,y)], method = "euclidean")
-Nadina_pcnm <- pcnm(Nadina_dist)
+Nadina_pcnm <- pcnm(Nadina_dist, threshold = 10000) # added threshold (analyis should change to this as well)
 Nadina[, c("PCNM1","PCNM2", "PCNM3",
              "PCNM4", "PCNM5","PCNM6") := .(Nadina_pcnm$vectors[,"PCNM1"],
                                             Nadina_pcnm$vectors[,"PCNM2"],
@@ -137,6 +137,7 @@ The smooth functions have several parameters that can be set to change their beh
 k: basis dimension - Determines the maximum number of base functions used to build the curve. - Sets the wiggliness of a smooth, in a trade-off with the smoothing parameter. - The k should always be less than the number of unique data points. - The complexity (i.e. non-linearity) of a smooth function in a fitted model is reflected by its effective degrees of freedom (EDF).
 
 bs specifies the type of basis functions. - The default for s() is tp (thin plate regression spline). - The default for te() and ti() is cr (cubic regression spline).
+bs = "cr", denotes knot based cubic regression splines
 
 When using te() and ti() basis function, we also need to set the parameter d, which specifies that predictors in the interaction are on the same scale or dimension. - For example, in te(Time, width, height, d=c(1,2)), indicates that width and height are one the same scale, but not Time.
 
@@ -144,56 +145,150 @@ gaussian - normal distribution
 link function: identity = model doesn't transform the predictions
 
 ```{r echo=FALSE}
+# Plantation Age
+
 #-- Chutanli
-gamMod_Chut <- gam(dNBR~s(PlantAge), data = Chutanli, method = "REML")
+gamMod_Chut <- gam(dNBR~s(PlantAge), data = Chutanli, method = "REML") # thin plate regression spline
+#gamMod_Chutcr <- gam(dNBR~s(PlantAge, bs = "cr", k = 20), data = Chutanli, method = "REML") # cubic regression spline
 
 summary(gamMod_Chut)
-gam.check(gamMod_Chut)
-plot(gamMod_Chut, residuals = TRUE)
-plot(gamMod_Chut)
 
-plot <- ggplot(Chutanli, aes(x = PlantAge, y = dNBR)) +
+plotChut <- ggplot(Chutanli, aes(x = PlantAge, y = dNBR)) +
   geom_smooth(method = "gam", 
               formula = y ~ s(x))
-plot
+plotChut
+
 
 #-- Tezzeron
 gamMod_Tez <- gam(dNBR~s(PlantAge), data = Tezzeron, method = "REML")
 
 summary(gamMod_Tez)
-gam.check(gamMod_Tez)
-plot(gamMod_Tez)
+
+plotTez <- ggplot(Tezzeron, aes(x = PlantAge, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotTez
+
 
 
 #-- Shovel
 gamMod_Sho <- gam(dNBR~s(PlantAge), data = Shovel, method = "REML")
-
 summary(gamMod_Sho)
-gam.check(gamMod_Sho)
-plot(gamMod_Sho)
+
+plotSho <- ggplot(Shovel, aes(x = PlantAge, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotSho
 
 
 #-- Verdun
 gamMod_Ver <- gam(dNBR~s(PlantAge), data = Verdun, method = "REML")
-
 summary(gamMod_Ver)
-gam.check(gamMod_Ver)
-plot(gamMod_Ver)
+
+plotVer <- ggplot(Verdun, aes(x = PlantAge, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotVer
 
 
 #-- Island
 gamMod_Isl <- gam(dNBR~s(PlantAge), data = Island, method = "REML")
 
 summary(gamMod_Isl)
-gam.check(gamMod_Isl)
-plot(gamMod_Isl)
+
+plotIsl <- ggplot(Island, aes(x = PlantAge, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotIsl
+
 
 
 #-- Nadina
 gamMod_Nad <- gam(dNBR~s(PlantAge), data = Nadina, method = "REML")
 
 summary(gamMod_Nad)
-gam.check(gamMod_Nad)
-plot(gamMod_Nad)
+
+plotNad <- ggplot(Nadina, aes(x = PlantAge, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotNad
+
 ```
 
+
+Crown closure
+```{r echo = FALSE}
+#-- Chutanli
+gamCC_Chut <- gam(dNBR~s(CROWN_CLOS), data = Chutanli, method = "REML") # thin plate regression spline
+#gamMod_Chutcr <- gam(dNBR~s(PlantAge, bs = "cr", k = 20), data = Chutanli, method = "REML") # cubic regression spline
+
+summary(gamCC_Chut)
+
+plotChutCC <- ggplot(Chutanli, aes(x = CROWN_CLOS, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotChutCC
+
+
+#-- Tezzeron
+gamCC_Tez <- gam(dNBR~s(CROWN_CLOS), data = Tezzeron, method = "REML")
+
+summary(gamCC_Tez)
+
+plotTezCC <- ggplot(Tezzeron, aes(x = CROWN_CLOS, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotTezCC
+
+
+
+#-- Shovel
+gamCC_Sho <- gam(dNBR~s(CROWN_CLOS), data = Shovel, method = "REML")
+
+summary(gamCC_Sho)
+
+plotShoCC <- ggplot(Shovel, aes(x = CROWN_CLOS, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotShoCC
+
+
+
+#-- Verdun
+gamMod_Ver <- gam(dNBR~s(PlantAge), data = Verdun, method = "REML")
+
+summary(gamMod_Ver)
+
+plotVerCC <- ggplot(Verdun, aes(x = CROWN_CLOS, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotVerCC
+
+plotVerPACC <- ggplot(Verdun, aes(x = PlantAge, y = CROWN_CLOS)) +
+  geom_smooth(method = "gam",
+              formula = y ~ s(x))
+plotVerPACC
+
+#-- Island
+gamCC_Isl <- gam(dNBR~s(CROWN_CLOS), data = Island, method = "REML")
+
+summary(gamCC_Isl)
+
+plotIslCC <- ggplot(Island, aes(x = CROWN_CLOS, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotIslCC
+
+
+
+#-- Nadina
+gamCC_Nad <- gam(dNBR~s(CROWN_CLOS), data = Nadina, method = "REML")
+
+summary(gamCC_Nad)
+
+plotNadCC <- ggplot(Nadina, aes(x = CROWN_CLOS, y = dNBR)) +
+  geom_smooth(method = "gam", 
+              formula = y ~ s(x))
+plotNadCC
+
+```
