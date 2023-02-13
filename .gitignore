@@ -81,3 +81,21 @@ fire.qgz
 Outputs/Tables/Table2.csv
 
 Outputs/Tables/Table2_ha.csv
+
+Inputs/G41607silv_270.csv
+
+Inputs/G51632silv_270.csv
+
+Inputs/R11498silv_270.csv
+
+Inputs/R11796silv_270.csv
+
+Inputs/R11921silv_270.csv
+
+Inputs/R21721silv_270.csv
+
+*.gpkg
+
+Outputs/Figures/
+
+Outputs/Tables/

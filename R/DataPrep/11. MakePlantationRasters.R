@@ -3,6 +3,7 @@
 
 # This code intersects the RESULTS spatial database with the fire perimeters and detailed RESULTS site prep data
 # to create rasters for each fire of interest with plantation
+# There is also code at the end to create csvs to analyse silviculture treatments based on 270m analysis grid
 
 library(data.table)
 library(plyr)
@@ -295,6 +296,90 @@ for(ix in 1:length(FiresOfInterest)){
                 paste0("./Inputs/Rasters/PlantationPreds/",Fire$FIRE_NUMBE,"_",rastToMake[iix],".tif"),
                 overwrite=TRUE)
   }
+}
+
+
+#-----------------------------------------------------------------------------------------#
+# Data prep for Broadcast burning, disc trenching, spacing and brushing Mann-Whitney tests
+#------------------------------ 1. Load all rasters --------------------------------------#
+
+#SpatialFilesPath <- "E:/Ingrid/Borealis/BVRCfire"
+SpatialFilesPath <- getwd()
+# Set the fires of interest - all 2018 fires with openings
+FiresOfInterest <- c("G41607", "G51632", "R11498", "R11796","R11921","R21721")
+
+
+# Read in the rasters
+variable_list <- list.files(paste0(SpatialFilesPath, "/Inputs/Rasters/"),
+                            pattern =  paste(FiresOfInterest, sep = "", collapse = "|"),
+                            recursive = TRUE,
+                            full.names = TRUE)
+variable_list <- grep("tif", variable_list, value=TRUE)
+# Drop OpenID, None and SitePrepped
+variable_list <- grep("OpenID|None|SitePrepped|n83", variable_list, value = TRUE, invert = TRUE)
+# For now remove this one because the raster contains only NA's -- Alana to fix and then remove this line
+variable_list <- grep("R11498_SpotBurn", variable_list, value = TRUE, invert = TRUE)
+variable_list <- c(variable_list,paste0(SpatialFilesPath,"/Inputs/Rasters/Topography/DEM",
+                                        c("aspect","hli","slope","tpi"),".tif"))
+
+variables <- sapply(variable_list, raster)
+
+
+# Rename the variables 
+variable.name <- lapply(str_split(variable_list,"/"), function(x) grep(".tif", x, value=TRUE))
+variable.name <- str_split(variable.name, ".tif", simplify = TRUE)[,1]
+
+names(variables) <- variable.name
+
+#ID the names of the categorical rasters
+silv_variables <- c("BroadBurn", "Brushed", "DebrisMade", "DebrisPiled", "Fertil", "MechUnk", 
+                    "PileBurn", "Prune", "Soil", "Spaced", "SpotBurn", "WBurn","Disc","dNBR_CAT")
+silRasts <- grep(paste(silv_variables,sep = "", collapse = "|"),variable.name,value=TRUE)
+
+#--------------------------2a. Resample rasters and stack----------------------#
+
+# Using base rasters resample response and predictor variables to same extent and resolution
+for(i in 1:length(FiresOfInterest)){
+  allFireRasts <- variables[c(grep(FiresOfInterest[i],variables),grep("DEM",variables))]
+  baseFireRast <- allFireRasts[grep("Base",allFireRasts)][[1]] #index just makes it not a list
+  allFireRasts <- allFireRasts[grep("Base",allFireRasts,invert=TRUE)]
+  #just the ones we want for this analysis:
+  Silv_Rasts <- allFireRasts[c(grep(paste(silv_variables,sep = "", collapse = "|"),allFireRasts),
+                               grep("dNBR",allFireRasts))]
+  
+  # Resample categorical and continuous variables differently
+  a <- list()
+  for(j in 1:length(Silv_Rasts)){
+    if(names(Silv_Rasts[[j]]) %in% silRasts){
+      a[[j]] <- raster::resample(Silv_Rasts[[j]], baseFireRast, method = "ngb")
+    } else if(names(Silv_Rasts[[j]])=="layer"){ #not a great workaround to disc not naming properly
+      a[[j]] <- raster::resample(Silv_Rasts[[j]], baseFireRast, method = "ngb")
+    }else{
+      a[[j]] <- raster::resample(Silv_Rasts[[j]], baseFireRast, method = "bilinear") 
+    }
+  }
+  fireID <- str_extract(names(Silv_Rasts[1]),FiresOfInterest[i])
+  SimpleRastnames <- str_remove(str_remove(names(Silv_Rasts),FiresOfInterest[i]),"_")
+  names(a) <- SimpleRastnames
+  #stack the simplified names and assign to fire id rast name
+  assign(paste0(fireID,"rasts"), stack(a))
+}
+# Create index of raster stacks
+RastStacks <- list(G41607rasts, G51632rasts, R11498rasts, R11796rasts, R11921rasts, R21721rasts)
+names(RastStacks) <- c("G41607rasts", "G51632rasts", "R11498rasts", "R11796rasts", "R11921rasts", "R21721rasts")
+
+#--------------------------2b. Intersect rasters with 270m grids ----------------------#
+#and output csvs for analysis
+for(i in 1:length(FiresOfInterest)){
+  #read in grids:
+  dat270_sf <- read_sf(paste0("./Inputs/",FiresOfInterest[i],"_270grid.shp"))
+  # intersect with rasters and create csv for each fire
+  rasts_of_int <- RastStacks[[paste0(FiresOfInterest[i],"rasts")]]
+  rasts270 <-  as.data.table(raster::extract(rasts_of_int, dat270_sf,sp = TRUE))
+  rasts270[,dNBR := dNBR*1000]
+  
+  fwrite(rasts270, paste0("./Inputs/",FiresOfInterest[i],"silv_270.csv"))
+  
 }
 
 
